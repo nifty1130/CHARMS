@@ -1,155 +1,83 @@
 /**
- * シグナリング情報の型定義
+ * QRシグナリングの型定義
  */
 
-/**
- * ICE Candidateのアドレス定義
-*/
-export enum AddressFamily {
-  IPv4 = 0b00,
-  IPv6 = 0b01,
-  mDNS = 0b10,
+/** アドレスの種類（パケットのフラグ bit0-1） */
+export const AddressFamily = {
+	IPv4: 0b00,
+	IPv6: 0b01,
+	Mdns: 0b10
+} as const;
+
+/** トランスポート層のプロトコル */
+export type CandidateProtocol = 'udp' | 'tcp';
+
+/** ICE 候補の種類（host: 端末自身のアドレス / srflx: STUN で得た外側のアドレス） */
+export type CandidateKind = 'host' | 'srflx';
+
+/** TCP 候補の接続方式 */
+export type TcpType = 'passive' | 'active' | 'so';
+
+/** パケットに入れる ICE 候補1件 */
+export interface SignalCandidate {
+	/** IPv4 / IPv6 アドレス、または mDNS ホスト名（`<uuid>.local`） */
+	address: string;
+	/** ポート番号（1〜65535） */
+	port: number;
+	kind: CandidateKind;
+	protocol: CandidateProtocol;
+	/** TCP 候補のときだけ使う */
+	tcpType?: TcpType;
 }
 
-/** 
- * トランスポート層のプロトコルの定義
- */
-export enum Protocol {
-  TCP = 0b00,
-  UDP = 0b01,
-}
-
-/**
- * ICE Candidateの種類の定義
- */
-export enum CandidateType {
-  Host = 0b00,
-  ServerReflexive = 0b01,
-}
-
-
-/**
- * TCP Candidateの接続方式の定義
- */
-export enum TcpType {
-  Active = 0b00,
-  Passive = 0b01,
-  SimultaneousOpen = 0b10,
-}
-
-/**
- * Role in WebRTC connection (determined by fingerprint comparison)
- */
-export enum Role {
-  Offerer = 'offerer',
-  Answerer = 'answerer',
-}
-
-/**
- * 接続状況の定義
- */
-export enum ConnectionState {
-  Idle = '初期状態',
-  Gathering = 'ICE Candidateの収集中',
-  Displaying = 'QRコード表示中',
-  ScannedOne = 'Offerのみスキャン完了',
-  Connecting = 'WebRTC接続試行中',
-  Connected = 'DataChannel確立済み',
-  Failed = '接続失敗',
-  Closed = '接続終了',
-}
-
-
-/**
- * Represents an ICE candidate in QWBP format
- */
-export interface QWBPCandidate {
-  /** IP address or mDNS hostname */
-  ip: string;
-
-  /** Port number (1-65535) */
-  port: number;
-
-  /** Candidate type: host or server-reflexive */
-  type: 'local' | 'srflx';
-
-  /** Transport protocol */
-  protocol: 'udp' | 'tcp';
-
-  /** TCP type (only for TCP candidates) */
-  tcpType?: 'passive' | 'active' | 'so';
+/** QR コードで交換する情報のすべて */
+export interface SignalPacket {
+	/** パケットのバージョン */
+	version: number;
+	/** DTLS フィンガープリント（32バイト） */
+	fingerprint: Uint8Array;
+	/** ICE ユーザー名フラグメント */
+	ufrag: string;
+	/** ICE パスワード */
+	pwd: string;
+	/** ICE 候補 */
+	candidates: SignalCandidate[];
 }
 
 /**
- * Decoded QWBP packet
+ * 接続の進み具合
+ *
+ * - `idle`: まだ何もしていない
+ * - `gathering`: 自分の接続情報を集めている
+ * - `ready`: 自分の QR を表示できる。相手の QR を待っている
+ * - `connecting`: 相手の QR を受け取り、接続を試みている
+ * - `connected`: DataChannel が開通した
+ * - `failed`: 接続できなかった
+ * - `closed`: 接続を終了した
  */
-export interface QWBPPacket {
-  /** Protocol version (currently 0) */
-  version: number;
+export type LinkState =
+	| 'idle'
+	| 'gathering'
+	| 'ready'
+	| 'connecting'
+	| 'connected'
+	| 'failed'
+	| 'closed';
 
-  /** 32-byte DTLS fingerprint */
-  fingerprint: Uint8Array;
-
-  /** ICE candidates */
-  candidates: QWBPCandidate[];
+/** PeerLink の設定 */
+export interface PeerLinkOptions {
+	/** パケットに含める候補数の上限（既定: 4） */
+	maxCandidates?: number;
+	/** 相手の情報を受け取ってから開通するまでの待ち時間（ミリ秒）。0 で無制限（既定: 0） */
+	connectTimeoutMs?: number;
+	/** RTCPeerConnection に渡す追加設定（LAN 専用なので既定では STUN/TURN なし） */
+	rtcConfig?: RTCConfiguration;
+	/** 状態が変わったとき */
+	onStateChange?: (state: LinkState) => void;
+	/** DataChannel が開通したとき */
+	onOpen?: (channel: RTCDataChannel) => void;
+	/** メッセージを受信したとき */
+	onMessage?: (data: string | ArrayBuffer) => void;
+	/** エラーが起きたとき */
+	onError?: (error: Error) => void;
 }
-
-/**
- * ICE credentials derived via HKDF
- */
-export interface IceCredentials {
-  /** ICE username fragment (6 chars) */
-  ufrag: string;
-
-  /** ICE password (24 chars) */
-  pwd: string;
-}
-
-/**
- * Peer information after QR scan
- */
-export interface PeerInfo {
-  /** 32-byte DTLS fingerprint */
-  fingerprint: Uint8Array;
-
-  /** ICE candidates */
-  candidates: QWBPCandidate[];
-
-  /** Derived ICE credentials */
-  credentials: IceCredentials;
-}
-
-/**
- * Configuration options for QWBPConnection
- */
-export interface QWBPOptions {
-  /** ICE servers for STUN/TURN */
-  iceServers?: RTCIceServer[];
-
-  /** Maximum number of candidates to include (default: 4) */
-  maxCandidates?: number;
-
-  /** Session timeout in milliseconds (default: 30000) */
-  timeout?: number;
-
-  /** Callback when state changes */
-  onStateChange?: (state: ConnectionState) => void;
-
-  /** Callback when DataChannel is ready */
-  onDataChannel?: (channel: RTCDataChannel) => void;
-
-  /** Callback when error occurs */
-  onError?: (error: Error) => void;
-}
-
-/**
- * Result of SDP reconstruction
- */
-export interface ReconstructedSDP {
-  /** The SDP string */
-  sdp: string;
-
-  /** SDP type: offer or answer */
-  type: RTCSdpType;
-}
-

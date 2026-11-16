@@ -1,16 +1,16 @@
 <script lang="ts">
-  import type { Node } from '../rtc/types';
+	import type { NodeInfo } from '../types';
 
-  // 仮のデータ
-  let nodes: Node[] = [
-    { id: 'cam-01', role: 'camera' },
-    { id: 'mon-01', role: 'monitor' }
-  ];
+	// 仮のデータ（画面は feat/web-gui ブランチで実装中）
+	const nodes: NodeInfo[] = [
+		{ id: 'cam1', role: 'camera', name: 'カメラ 1' },
+		{ id: 'mon1', role: 'monitor', name: 'モニター 1' }
+	];
 </script>
 
 <h1>CHARMsExEx Host</h1>
 <ul>
-  {#each nodes as node}
-    <li><strong>{node.id}</strong> - {node.role}</li>
-  {/each}
+	{#each nodes as node (node.id)}
+		<li><strong>{node.name}</strong> - {node.role}</li>
+	{/each}
 </ul>

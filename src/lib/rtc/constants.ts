@@ -1,55 +1,64 @@
 /**
- * QWBPプロトコル定数
+ * QRシグナリングパケットの定数
+ *
+ * パケット形式は QWBP (QR-WebRTC Bootstrap Protocol) をベースにしつつ、
+ * ICE の ufrag / pwd をパケットに同梱する CHARMS 独自版（バージョン 1）。
+ * ブラウザが生成した SDP を書き換えずに済むため、SDP 書き換え規制の影響を受けない。
  */
 
-/** QWBPパケットを識別するためのマジックパケット */
-export const MAGIC_BYTE = 0x51; // 'Q'を意味するASCIIコード
+/** パケットを識別するためのマジックバイト（ASCII の 'Q'） */
+export const MAGIC_BYTE = 0x51;
 
-/** QWBPプロトコルのバージョン */
-export const PROTOCOL_VERSION = 0;
+/** パケットのバージョン（0 は本家 QWBP。CHARMS 版は 1） */
+export const PACKET_VERSION = 1;
 
-/** DTLSフィンガープリントのサイズ (バイト単位、SHA-256) */
-export const FINGERPRINT_SIZE = 32;
+/** バージョン番号が入っているビット（2バイト目の下位3ビット） */
+export const VERSION_MASK = 0b111;
 
-/** パケットヘッダーのサイズ（バイト単位、マジックバイト + バージョン） */
+/** ヘッダーのサイズ（マジックバイト + バージョン） */
 export const HEADER_SIZE = 2;
 
-/** 最小パケットサイズ（ヘッダー + フィンガープリント + IPv4候補1つ分） */
-export const MIN_PACKET_SIZE = HEADER_SIZE + FINGERPRINT_SIZE + 7;
+/** DTLS フィンガープリントのサイズ（SHA-256 = 32バイト） */
+export const FINGERPRINT_SIZE = 32;
 
-/** IPv4候補のサイズ（フラグ + IP + ポート） */
-export const IPV4_CANDIDATE_SIZE = 1 + 4 + 2; // 7 bytes
+/** ufrag / pwd の最大長（RFC 8839: ufrag は 4〜256文字、pwd は 22〜256文字。長さを1バイトで持つので 255 まで） */
+export const MAX_CREDENTIAL_LENGTH = 255;
 
-/** IPv6/mDNS候補のサイズ（フラグ + IP/UUID + ポート） */
-export const IPV6_CANDIDATE_SIZE = 1 + 16 + 2; // 19 bytes
+/** IPv4 アドレスのバイト数 */
+export const IPV4_SIZE = 4;
 
-/** ufrag（ユーザーフラグメント）生成用HKDF情報文字列 */
-export const HKDF_INFO_UFRAG = 'QWBP-ICE-UFRAG-v1';
+/** IPv6 アドレス / mDNS の UUID のバイト数 */
+export const IPV6_SIZE = 16;
 
-/** パスワード生成用HKDF情報文字列 */
-export const HKDF_INFO_PWD = 'QWBP-ICE-PWD-v1';
+/** ポート番号のバイト数（ビッグエンディアン） */
+export const PORT_SIZE = 2;
 
-/** ufragの出力長（Base64urlで6文字生成) */
-export const HKDF_UFRAG_LENGTH = 4;
-
-/** パスワードの出力長（Base64urlで24文字を生成） */
-export const HKDF_PWD_LENGTH = 18; //Base64（およびBase64url）エンコードでは、3バイトのデータが4文字のテキストに変換される。
-/** 含める候補数のデフォルト最大値 */
+/** パケットに含める候補数の既定の上限 */
 export const DEFAULT_MAX_CANDIDATES = 4;
 
-/** ICE候補の優先度（RFC 8445） */
+/** 相手の情報を受け取ってから DataChannel が開くまでの既定の待ち時間（ミリ秒）。0 で無制限 */
+export const DEFAULT_CONNECT_TIMEOUT_MS = 0;
+
+/** ICE 候補の収集を待つ最大時間（ミリ秒） */
+export const GATHERING_TIMEOUT_MS = 10_000;
+
+/** DataChannel のラベル */
+export const CHANNEL_LABEL = 'charms';
+
+/** DataChannel の ID（両端で同じ値を使う negotiated チャネル） */
+export const CHANNEL_ID = 0;
+
+/** ICE 候補の優先度（RFC 8445 の推奨式による代表値） */
 export const CANDIDATE_PRIORITIES = {
-  HOST_UDP: 2122260223,
-  HOST_TCP: 2105524223,
-  SRFLX: 1686052607,
+	HOST_UDP: 2122260223,
+	HOST_TCP: 2105524223,
+	SRFLX: 1686052607
 } as const;
 
 /**
- * 推奨されるQRコード誤り訂正レベル
+ * 推奨する QR コードの誤り訂正レベル
  *
- * レベルL（7%の復元能力）がQWBPに最適な理由:
- * - 画面表示のQRコードはコントラストが完璧で、物理的な損傷がないため
- * - 高いレベル（M=15%, Q=25%, H=30%）はQRコードのサイズやバージョンを増加させるため
- * - レベルHを使用するとv4コードがv5-6に上がってしまい、最適化の努力が無駄になるため
+ * 画面に表示した QR は汚れや欠けがないため、最も低い L（7%）で十分。
+ * レベルを上げると QR が細かくなり、かえって読み取りにくくなる。
  */
 export const QR_ERROR_CORRECTION_LEVEL = 'L' as const;

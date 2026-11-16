@@ -1,169 +1,182 @@
 /**
- * QWBP SDP Reconstruction
+ * SDP の読み取りと組み立て
  *
- * Reconstructs valid WebRTC SDP from QWBP packet data
+ * SDP はブラウザ同士が接続条件を伝え合うための長いテキスト。
+ * そのままでは QR に入らないので、端末ごとに変わる部分（フィンガープリント・
+ * ICE 認証情報・候補）だけを取り出して送り、受け取った側で SDP を組み立て直す。
  *
- * @category SDP
- * @packageDocumentation
+ * 自分側の SDP は一切書き換えない。組み立てるのは「相手側の SDP」だけ。
  */
 
-import { SDP_TEMPLATE, CANDIDATE_PRIORITIES } from './constants.js';
-import {
-  formatFingerprint,
-  generateSessionId,
-  deriveCredentials,
-} from './crypto.js';
-import type { QWBPCandidate, IceCredentials } from './types.js';
+import { addressRank } from './address';
+import { CANDIDATE_PRIORITIES } from './constants';
+import { formatFingerprint, parseFingerprint } from './fingerprint';
+import { isValidIceCredential } from './packet';
+import type { SignalCandidate, SignalPacket, TcpType } from './types';
 
-/**
- * Generates a deterministic foundation from candidate data
- *
- * Foundation should be unique per candidate but deterministic
- */
-async function generateFoundation(
-  type: string,
-  protocol: string,
-  ip: string,
-  port: number
-): Promise<string> {
-  const data = `${type}${protocol}${ip}${port}`;
-  const encoded = new TextEncoder().encode(data);
-  const hash = await crypto.subtle.digest('SHA-256', encoded);
-  const bytes = new Uint8Array(hash);
-
-  // Use first 4 bytes as hex string
-  return Array.from(bytes.slice(0, 4))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+/** ブラウザが作った SDP から取り出した情報 */
+export interface LocalDescriptionInfo {
+	fingerprint: Uint8Array;
+	ufrag: string;
+	pwd: string;
+	/** メディアセクションの識別子（通常は "0"） */
+	mid: string;
+	candidates: SignalCandidate[];
 }
 
 /**
- * Gets the priority for a candidate based on type and protocol
+ * SDP の `a=candidate:` 行（または candidate 文字列）を読み取る
+ *
+ * @param line `candidate:...` または `a=candidate:...`
+ * @returns 候補。読み取れない、またはパケットに入れられない場合は null
  */
-function getCandidatePriority(
-  type: 'host' | 'srflx',
-  protocol: 'udp' | 'tcp'
-): number {
-  if (type === 'srflx') {
-    return CANDIDATE_PRIORITIES.SRFLX;
-  }
-  return protocol === 'udp'
-    ? CANDIDATE_PRIORITIES.HOST_UDP
-    : CANDIDATE_PRIORITIES.HOST_TCP;
+export function parseCandidateLine(line: string): SignalCandidate | null {
+	const match =
+		/^(?:a=)?candidate:\S+ (\d+) (\S+) \d+ (\S+) (\d+) typ (\S+)(.*)$/i.exec(line.trim());
+	if (!match) return null;
+
+	const [, component, protocolRaw, address, portRaw, kind, rest] = match;
+	const protocol = protocolRaw.toLowerCase();
+	const port = Number(portRaw);
+
+	// コンポーネント 1（RTP）だけを使う。BUNDLE + rtcp-mux なので 2 は不要
+	if (component !== '1') return null;
+	if (protocol !== 'udp' && protocol !== 'tcp') return null;
+	if (kind !== 'host' && kind !== 'srflx') return null;
+	if (port < 1 || port > 0xffff) return null;
+	if (addressRank(address) === null) return null;
+
+	const candidate: SignalCandidate = { address, port, kind, protocol };
+	if (protocol === 'tcp') {
+		const tcpType = / tcptype (\S+)/i.exec(rest)?.[1].toLowerCase();
+		candidate.tcpType = (['passive', 'active', 'so'] as TcpType[]).find((t) => t === tcpType);
+	}
+	return candidate;
 }
 
 /**
- * Builds a candidate string for use with RTCPeerConnection.addIceCandidate()
+ * QR に入れる候補を選ぶ
  *
- * @category SDP
+ * UDP だけに絞り、つながりやすい順（IPv4 → mDNS → IPv6）に並べて上限数まで残す。
+ * 仮想ネットワークアダプタ（Hyper-V、Docker など）の候補も混ざるが、
+ * ICE が全候補を試して届くものを自動で選ぶので、ここでは絞り込まない。
  *
- * @param candidate - QWBP candidate data
- * @returns Candidate string (without "a=" prefix)
+ * @param candidates 収集した候補
+ * @param max 残す数の上限
  */
-export async function buildCandidateString(
-  candidate: QWBPCandidate
-): Promise<string> {
-  const foundation = await generateFoundation(
-    candidate.type,
-    candidate.protocol,
-    candidate.ip,
-    candidate.port
-  );
-
-  const priority = getCandidatePriority(candidate.type, candidate.protocol);
-
-  let str = `candidate:${foundation} 1 ${candidate.protocol} ${priority} ${candidate.ip} ${candidate.port} typ ${candidate.type}`;
-
-  // For srflx candidates, add raddr/rport (required by browsers)
-  if (candidate.type === 'srflx') {
-    str += ` raddr ${candidate.ip} rport ${candidate.port}`;
-  }
-
-  // Add TCP type if applicable
-  if (candidate.protocol === 'tcp' && candidate.tcpType) {
-    str += ` tcptype ${candidate.tcpType}`;
-  }
-
-  return str;
+export function selectCandidates(candidates: SignalCandidate[], max: number): SignalCandidate[] {
+	const seen = new Set<string>();
+	return candidates
+		.filter((c) => c.protocol === 'udp')
+		.filter((c) => {
+			const key = `${c.address}:${c.port}`;
+			if (seen.has(key)) return false;
+			seen.add(key);
+			return true;
+		})
+		.map((candidate, index) => ({ candidate, index, rank: addressRank(candidate.address) ?? 99 }))
+		.sort((a, b) => a.rank - b.rank || a.index - b.index)
+		.slice(0, max)
+		.map((entry) => entry.candidate);
 }
 
 /**
- * Reconstructs a minimal SDP from QWBP data (without candidates)
+ * ブラウザが作った SDP から、QR で送る情報を取り出す
  *
- * Candidates should be added separately via RTCPeerConnection.addIceCandidate()
- * to avoid browser-specific SDP parsing issues with IPv6, mDNS, etc.
- *
- * @category SDP
- *
- * @param fingerprint - 32-byte DTLS fingerprint
- * @param isOffer - Whether this is an offer (true) or answer (false)
- * @param credentials - Optional pre-computed credentials (if not provided, will derive)
- * @returns Reconstructed SDP string (without candidates)
- *
- * @example
- * ```typescript
- * const sdp = await reconstructSDP(remoteFingerprint, true);
- * await pc.setRemoteDescription({ type: 'offer', sdp });
- * // Then add candidates via addIceCandidate()
- * ```
+ * @param sdp `pc.localDescription.sdp`（候補の収集が終わったもの）
+ * @returns 取り出した情報。必要な行が見つからないときは null
  */
-export async function reconstructSDP(
-  fingerprint: Uint8Array,
-  isOffer: boolean,
-  credentials?: IceCredentials
-): Promise<string> {
-  // Derive credentials if not provided
-  const creds = credentials || (await deriveCredentials(fingerprint));
+export function parseLocalDescription(sdp: string): LocalDescriptionInfo | null {
+	const fingerprintText = /^a=fingerprint:sha-256 (\S+)/im.exec(sdp)?.[1];
+	const ufrag = /^a=ice-ufrag:(\S+)/m.exec(sdp)?.[1];
+	const pwd = /^a=ice-pwd:(\S+)/m.exec(sdp)?.[1];
+	const mid = /^a=mid:(\S+)/m.exec(sdp)?.[1];
+	if (!fingerprintText || !ufrag || !pwd || mid === undefined) return null;
 
-  // Generate session ID from fingerprint
-  const sessionId = await generateSessionId(fingerprint);
+	const fingerprint = parseFingerprint(fingerprintText);
+	if (!fingerprint) return null;
 
-  // Format fingerprint for SDP
-  const fingerprintStr = formatFingerprint(fingerprint);
+	const candidates = sdp
+		.split(/\r?\n/)
+		.filter((line) => line.startsWith('a=candidate:'))
+		.map(parseCandidateLine)
+		.filter((c): c is SignalCandidate => c !== null);
 
-  // Determine setup value
-  // Offer: actpass (can be either active or passive)
-  // Answer: active (will initiate DTLS connection)
-  const setup = isOffer ? 'actpass' : 'active';
-
-  // Build SDP from template WITHOUT candidates
-  // Candidates will be added via addIceCandidate() to avoid browser parsing issues
-  // with IPv6, mDNS, and srflx candidate formats
-  let sdp = SDP_TEMPLATE.replace('{sessionId}', sessionId)
-    .replace('{ufrag}', creds.ufrag)
-    .replace('{pwd}', creds.pwd)
-    .replace('{fingerprint}', fingerprintStr)
-    .replace('{setup}', setup)
-    .replace('{candidates}', '');
-
-  // Ensure proper line endings
-  sdp = sdp.replace(/\r?\n/g, '\r\n');
-
-  return sdp;
+	return { fingerprint, ufrag, pwd, mid, candidates };
 }
 
 /**
- * Validates that an SDP can be used for QWBP
+ * 相手の情報から、相手側の SDP（Answer）を組み立てる
  *
- * @category SDP
+ * 両方の端末が Offer を作った状態で、互いに「相手は Answer を返した」ことにして
+ * 接続する。こうすると、どちらが先に QR を読んでもよく、自分側の SDP も書き換えずに済む。
  *
- * @param sdp - SDP string to validate
- * @returns true if SDP contains required fields
+ * @param remote 相手のパケット
+ * @param setup 相手の DTLS の役割（`active`: 相手がクライアント / `passive`: 相手がサーバー）
+ * @param mid 自分側の SDP のメディアセクション識別子
+ * @returns `setRemoteDescription` に渡す SDP
  */
-export function validateSDP(sdp: string): boolean {
-  const required = [
-    /a=fingerprint:sha-256/i,
-    /a=ice-ufrag:/,
-    /a=ice-pwd:/,
-    /m=application/,
-  ];
+export function buildRemoteAnswer(
+	remote: Pick<SignalPacket, 'fingerprint' | 'ufrag' | 'pwd'>,
+	setup: 'active' | 'passive',
+	mid: string
+): string {
+	// 外から来た値を SDP に埋め込むので、余計な行を差し込まれないよう検査する
+	if (!isValidIceCredential(remote.ufrag) || !isValidIceCredential(remote.pwd)) {
+		throw new Error('ICE の認証情報が不正です');
+	}
+	if (!/^[A-Za-z0-9_-]+$/.test(mid)) {
+		throw new Error('mid が不正です');
+	}
 
-  return required.every((pattern) => pattern.test(sdp));
+	// RFC 4566: 各行は最後の行も含めて CRLF で終える
+	return (
+		[
+			'v=0',
+			'o=- 1 2 IN IP4 127.0.0.1',
+			's=-',
+			't=0 0',
+			`a=group:BUNDLE ${mid}`,
+			'm=application 9 UDP/DTLS/SCTP webrtc-datachannel',
+			'c=IN IP4 0.0.0.0',
+			`a=ice-ufrag:${remote.ufrag}`,
+			`a=ice-pwd:${remote.pwd}`,
+			`a=fingerprint:sha-256 ${formatFingerprint(remote.fingerprint)}`,
+			`a=setup:${setup}`,
+			`a=mid:${mid}`,
+			'a=sctp-port:5000',
+			'a=max-message-size:262144'
+		].join('\r\n') + '\r\n'
+	);
 }
 
-// Export as namespace
-export const SDPReconstructor = {
-  reconstructSDP,
-  buildCandidateString,
-  validateSDP,
-};
+/**
+ * 候補を `addIceCandidate` に渡せる形にする
+ *
+ * @param candidate 候補
+ * @param index 何番目の候補か（foundation に使う）
+ * @param mid 自分側の SDP のメディアセクション識別子
+ */
+export function buildCandidateInit(
+	candidate: SignalCandidate,
+	index: number,
+	mid: string
+): RTCIceCandidateInit {
+	const priority =
+		candidate.kind === 'srflx'
+			? CANDIDATE_PRIORITIES.SRFLX
+			: candidate.protocol === 'udp'
+				? CANDIDATE_PRIORITIES.HOST_UDP
+				: CANDIDATE_PRIORITIES.HOST_TCP;
+
+	// 同じ優先度だと順序が不定になるので、パケット内の順に少しずつ下げる
+	let line = `candidate:${index + 1} 1 ${candidate.protocol} ${priority - index} ${candidate.address} ${candidate.port} typ ${candidate.kind}`;
+	if (candidate.kind === 'srflx') {
+		// 元のアドレスは送っていないので、ダミーとして同じ値を入れる（ブラウザが必須とするため）
+		line += ` raddr ${candidate.address} rport ${candidate.port}`;
+	}
+	if (candidate.protocol === 'tcp') {
+		line += ` tcptype ${candidate.tcpType ?? 'passive'}`;
+	}
+	return { candidate: line, sdpMid: mid };
+}
