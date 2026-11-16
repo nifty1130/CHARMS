@@ -96,9 +96,20 @@ docs/             仕様書、画面写真
 
 ### ブランチの運用
 
-- `main`: 公開中の版。ここに入ると GitHub Pages に自動で公開されます。
+- `main`: 配布する版。
 - `develop`: 開発中の版。
 - 作業は `feat/…` などのブランチで行い、`develop` へのプルリクエストにします。プルリクエストでは型チェックとテストが自動で走ります。
+
+### 公開の手順（GitHub Pages）
+
+いまは公開していません。公開の仕組みは用意してあるので、公開すると決めたら次の順で設定します。
+
+1. リポジトリを公開にする（Settings → General → Change repository visibility）。無料プランでは、GitHub Pages は公開リポジトリでしか使えません。公開すると、これまでの履歴（コミットした人のメールアドレスを含む）も誰でも見られるようになります。
+2. Settings → Pages で、Source を「GitHub Actions」にする。
+3. Settings → Secrets and variables → Actions → Variables で、`DEPLOY_PAGES` という変数を作り、値を `true` にする。
+4. `main` に変更を入れる（または Actions の画面から「Deploy」を手動で実行する）と、`https://<ユーザー名>.github.io/CHARMsExEx/` に公開されます。
+
+GitHub Pages 以外で配布する場合は、`npm run build` でできる `build/` フォルダを、https で配信できる場所に置きます。サブフォルダに置くときは、`BASE_PATH=/フォルダ名` を付けてビルドします。
 
 ## これまでの経緯
 

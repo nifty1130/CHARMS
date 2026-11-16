@@ -2,6 +2,9 @@ name: Deploy
 
 # main ブランチに入った内容を、GitHub Pages に公開する。
 # 公開された URL を各端末で一度開けば、当日はインターネットなしで使える。
+#
+# 公開するかどうかは、リポジトリの変数 DEPLOY_PAGES で決める（README の「公開の手順」を参照）。
+# 変数を設定していない間は、このワークフローは何もしない。
 
 on:
   push:
@@ -20,6 +23,7 @@ concurrency:
 jobs:
   build:
     name: ビルド
+    if: ${{ vars.DEPLOY_PAGES == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
