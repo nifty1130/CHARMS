@@ -1,14 +1,25 @@
-export type RoleId = 'host' | 'camera' | 'admin' | 'monitor' | 'controller';
+import type { RoleId } from '$lib/charms/protocol';
+
+export type { RoleId };
 
 export interface Role {
 	id: RoleId;
+	/** 英字の略号（画面の隅に小さく出す） */
 	code: string;
+	/** CHARMS の頭文字 */
 	letter: string;
+	/** 英語の正式名 */
 	name: string;
-	nameJa: string;
-	description: string;
+	/** 画面に大きく出す日本語の名前 */
+	title: string;
+	/** ひとことで言うと何をする端末か */
+	summary: string;
+	/** どんな端末で開くとよいか */
+	device: string;
+	/** 台数の目安 */
 	limit: string;
-	href: string;
+	/** ページのパス */
+	path: '/host/' | '/camera/' | '/admin/' | '/monitor/' | '/controller/';
 }
 
 export const roles: Role[] = [
@@ -17,54 +28,58 @@ export const roles: Role[] = [
 		code: 'HOST',
 		letter: 'H',
 		name: 'Host',
-		nameJa: 'シグナリングハブ',
-		description:
-			'全クライアントとのデータチャネルを束ね、ピアリングと制御命令を取り次ぐセッションの中継点。',
-		limit: '× 1',
-		href: '/host'
+		title: 'ホスト',
+		summary: '全員をつなぐ中心の1台です。最初にこれを1台だけ開きます。',
+		device: 'カメラ付きのノート PC がおすすめ',
+		limit: '1台だけ',
+		path: '/host/'
 	},
 	{
 		id: 'camera',
 		code: 'CAM',
 		letter: 'C',
 		name: 'Camera',
-		nameJa: '映像入力',
-		description:
-			'Webカメラまたは画面共有の映像を、Host の指示で接続した Monitor に直接送出する。',
-		limit: '× n',
-		href: '/camera'
+		title: 'カメラ',
+		summary: 'この端末のカメラや画面を、映像として送ります。',
+		device: 'スマホ・タブレット・PC',
+		limit: '何台でも',
+		path: '/camera/'
 	},
 	{
 		id: 'admin',
 		code: 'ADM',
 		letter: 'A',
 		name: 'Admin',
-		nameJa: '管理者',
-		description:
-			'歌詞・タイトルなどのテキストを生成し、Host 経由で Monitor 表示として配信する。',
-		limit: '× n',
-		href: '/admin'
+		title: 'テロップ',
+		summary: 'タイトルや歌詞などの文字を、映像として送ります。',
+		device: 'キーボードのある PC がおすすめ',
+		limit: '何台でも',
+		path: '/admin/'
 	},
 	{
 		id: 'monitor',
 		code: 'MON',
 		letter: 'M',
 		name: 'Monitor',
-		nameJa: '映像出力',
-		description:
-			'Host の指示に従って Camera と接続し、受け取った映像/テキストをフルスクリーン出力する。',
-		limit: '× n',
-		href: '/monitor'
+		title: 'モニター',
+		summary: '選ばれた映像を全画面で映します。',
+		device: 'プロジェクターやテレビにつないだ端末',
+		limit: '何台でも',
+		path: '/monitor/'
 	},
 	{
 		id: 'controller',
 		code: 'CTRL',
 		letter: 'R',
 		name: 'Controller',
-		nameJa: 'スイッチャー',
-		description:
-			'どの Camera をどの Monitor に割り当てるかをリアルタイムで切替える、操作端末。',
-		limit: '× n',
-		href: '/controller'
+		title: 'スイッチャー',
+		summary: 'どの映像をどのモニターに映すかを切り替えます。',
+		device: 'タブレット・PC',
+		limit: '何台でも',
+		path: '/controller/'
 	}
 ];
+
+export function roleOf(id: RoleId): Role {
+	return roles.find((role) => role.id === id)!;
+}
