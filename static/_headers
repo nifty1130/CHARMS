@@ -1,0 +1,4 @@
+# Cloudflare での配信時のヘッダー
+# ファイル名に内容のハッシュが入っているものは、長期間キャッシュしてよい
+/_app/immutable/*
+  Cache-Control: public, max-age=31536000, immutable

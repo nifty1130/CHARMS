@@ -143,7 +143,7 @@ describe('sdp', () => {
 			protocol: 'tcp',
 			tcpType: 'active'
 		});
-		expect(parseCandidateLine('candidate:9 1 udp 1 192.168.1.23 5 typ relay')).toBeNull();
+		expect(parseCandidateLine('candidate:9 1 udp 1 192.168.1.23 5 typ prflx')).toBeNull();
 		expect(parseCandidateLine('not a candidate')).toBeNull();
 	});
 
@@ -172,5 +172,48 @@ describe('sdp', () => {
 			candidate: 'candidate:1 1 udp 2122260223 192.168.1.23 50002 typ host',
 			sdpMid: '0'
 		});
+	});
+
+	it('STUN / TURN で得た候補（srflx・relay）を読み取り、相手に渡す形にできる', () => {
+		const srflx = parseCandidateLine(
+			'a=candidate:842163049 1 udp 1677729535 203.0.113.5 50002 typ srflx raddr 192.168.1.23 rport 50002 generation 0'
+		);
+		const relay = parseCandidateLine(
+			'a=candidate:3 1 udp 33562623 198.51.100.7 61234 typ relay raddr 203.0.113.5 rport 50002 generation 0'
+		);
+		expect(srflx).toEqual({ address: '203.0.113.5', port: 50002, kind: 'srflx', protocol: 'udp' });
+		expect(relay).toEqual({ address: '198.51.100.7', port: 61234, kind: 'relay', protocol: 'udp' });
+
+		expect(buildCandidateInit(relay!, 2, '0').candidate).toBe(
+			'candidate:3 1 udp 41885693 198.51.100.7 61234 typ relay raddr 198.51.100.7 rport 61234'
+		);
+		// つながりやすい順（host → srflx → relay）に優先度が下がる
+		const priority = (kind: 'host' | 'srflx' | 'relay') =>
+			Number(buildCandidateInit({ ...relay!, kind }, 0, '0').candidate!.split(' ')[3]);
+		expect(priority('host')).toBeGreaterThan(priority('srflx'));
+		expect(priority('srflx')).toBeGreaterThan(priority('relay'));
+	});
+
+	it('候補が多いときも、srflx と relay を1つずつ必ず残す', () => {
+		const make = (kind: 'host' | 'srflx' | 'relay', address: string, port: number) =>
+			({ address, port, kind, protocol: 'udp' }) as const;
+		const gathered = [
+			make('host', '192.168.1.23', 1),
+			make('host', '10.0.0.5', 2),
+			make('host', '172.20.0.1', 3),
+			make('host', '2001:db8::1', 4),
+			make('srflx', '203.0.113.5', 5),
+			make('relay', '198.51.100.7', 6),
+			make('relay', '198.51.100.7', 7)
+		];
+
+		// 上限 4: host 2 + srflx 1 + relay 1
+		expect(selectCandidates(gathered, 4).map((c) => c.port)).toEqual([1, 2, 5, 6]);
+		// 上限に余裕があれば、残りの候補も入れる（host → srflx → relay の順）
+		expect(selectCandidates(gathered, 6).map((c) => c.port)).toEqual([1, 2, 3, 4, 5, 6]);
+		expect(selectCandidates(gathered, 99).map((c) => c.port)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+		// host がなくても（アドレスを隠す設定の端末など）つながる候補を残す
+		expect(selectCandidates(gathered.slice(4), 4).map((c) => c.kind)).toEqual(['srflx', 'relay', 'relay']);
+		expect(selectCandidates(gathered, 1).map((c) => c.kind)).toEqual(['srflx']);
 	});
 });

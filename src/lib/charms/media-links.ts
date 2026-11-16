@@ -8,11 +8,12 @@
  * - 受ける側: 届いた打ち合わせを {@link handleSignal} に渡すと、映像が届き始める
  */
 
+import { waitForGathering } from '$lib/rtc';
 import { QUALITY_PRESETS, THUMBNAIL } from './quality';
 import type { LinkProfile, QualityId } from './protocol';
 
-/** 候補の収集を待つ最大時間（LAN 内なら通常は一瞬で終わる） */
-const GATHERING_TIMEOUT_MS = 2000;
+/** STUN / TURN を使わないときに、候補の収集を待つ最大時間（LAN 内なら通常は一瞬で終わる） */
+const LAN_GATHERING_TIMEOUT_MS = 2000;
 
 export interface MediaLinksOptions {
 	/** 打ち合わせの内容を相手に届ける（ホスト経由） */
@@ -23,6 +24,12 @@ export interface MediaLinksOptions {
 	onTargets?: (targets: string[]) => void;
 	/** 接続が切れたとき（ホストに知らせて張り直してもらう） */
 	onFailed?: (sourceId: string | null, sinkId: string | null) => void;
+	/**
+	 * いま使える STUN / TURN サーバー（省略すると使わない＝同じ LAN 内だけでつながる）
+	 *
+	 * 接続を張るたびに呼ばれるので、認証情報の更新にも追従できる。
+	 */
+	iceServers?: () => RTCIceServer[];
 }
 
 interface Outgoing {
@@ -91,7 +98,7 @@ export class MediaLinks {
 	async offerTo(targetId: string, profile: LinkProfile): Promise<void> {
 		this.#closeOutgoing(targetId);
 
-		const pc = new RTCPeerConnection({ iceServers: [] });
+		const pc = this.#createConnection();
 		const video = this.#stream?.getVideoTracks()[0] ?? null;
 		const audio = this.#stream?.getAudioTracks()[0] ?? null;
 
@@ -125,7 +132,7 @@ export class MediaLinks {
 
 		try {
 			await pc.setLocalDescription(await pc.createOffer());
-			await waitForGathering(pc);
+			await gather(pc);
 			if (this.#outgoing.get(targetId) !== link || !pc.localDescription) return;
 			this.#options.sendSignal(targetId, pc.localDescription.toJSON());
 		} catch {
@@ -159,7 +166,7 @@ export class MediaLinks {
 		if (description.type !== 'offer') return;
 
 		this.#closeIncoming(fromId);
-		const pc = new RTCPeerConnection({ iceServers: [] });
+		const pc = this.#createConnection();
 		const link: Incoming = { pc, stream: null };
 		this.#incoming.set(fromId, link);
 
@@ -182,7 +189,7 @@ export class MediaLinks {
 		try {
 			await pc.setRemoteDescription(description);
 			await pc.setLocalDescription(await pc.createAnswer());
-			await waitForGathering(pc);
+			await gather(pc);
 			if (this.#incoming.get(fromId) !== link || !pc.localDescription) return;
 			this.#options.sendSignal(fromId, pc.localDescription.toJSON());
 		} catch {
@@ -208,6 +215,10 @@ export class MediaLinks {
 	}
 
 	// ---- 内部処理 ----
+
+	#createConnection(): RTCPeerConnection {
+		return new RTCPeerConnection({ iceServers: this.#options.iceServers?.() ?? [] });
+	}
 
 	#closeOutgoing(targetId: string): void {
 		const link = this.#outgoing.get(targetId);
@@ -261,19 +272,8 @@ export class MediaLinks {
 	}
 }
 
-/** ICE 候補の収集が終わるまで待つ（時間切れでも、集まった分で先へ進む） */
-function waitForGathering(pc: RTCPeerConnection): Promise<void> {
-	if (pc.iceGatheringState === 'complete') return Promise.resolve();
-	return new Promise((resolve) => {
-		const done = () => {
-			clearTimeout(timer);
-			pc.removeEventListener('icegatheringstatechange', onChange);
-			resolve();
-		};
-		const onChange = () => {
-			if (pc.iceGatheringState === 'complete') done();
-		};
-		const timer = setTimeout(done, GATHERING_TIMEOUT_MS);
-		pc.addEventListener('icegatheringstatechange', onChange);
-	});
+/** 候補が出そろうのを待つ（STUN / TURN を使わないときは、短い時間で切り上げる） */
+function gather(pc: RTCPeerConnection): Promise<void> {
+	const usesServers = (pc.getConfiguration().iceServers ?? []).length > 0;
+	return waitForGathering(pc, usesServers ? {} : { timeoutMs: LAN_GATHERING_TIMEOUT_MS });
 }

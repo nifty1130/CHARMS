@@ -18,7 +18,8 @@ const candidates: SignalCandidate[] = [
 		protocol: 'udp'
 	},
 	{ address: '2001:db8::8a2e:370:7334', port: 9, kind: 'host', protocol: 'tcp', tcpType: 'active' },
-	{ address: '203.0.113.5', port: 1, kind: 'srflx', protocol: 'udp' }
+	{ address: '203.0.113.5', port: 1, kind: 'srflx', protocol: 'udp' },
+	{ address: '198.51.100.7', port: 61234, kind: 'relay', protocol: 'udp' }
 ];
 
 describe('base45', () => {

@@ -11,6 +11,7 @@
  * そのため、ホストの端末が非力でも映像の品質には影響しない。
  */
 
+import { cachedIceServers } from './ice';
 import { LocalHostBeacon } from './local-pairing.svelte';
 import { MediaLinks } from './media-links';
 import { Pairing } from './pairing.svelte';
@@ -84,6 +85,7 @@ export class HostSession implements SwitcherApi {
 	#destroyed = false;
 
 	readonly #media = new MediaLinks({
+		iceServers: cachedIceServers,
 		sendSignal: (toId, description) => this.#sendTo(toId, { type: 'signal', fromId: HOST_ID, description }),
 		onStreams: (streams) => {
 			this.thumbnails = streams;

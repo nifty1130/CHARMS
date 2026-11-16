@@ -7,7 +7,7 @@
  * サービスワーカー — アプリをオフラインで開けるようにする
  *
  * 初回にアプリの全ファイルを端末に保存しておき、以降はネットワークなしでも起動できる。
- * 文化祭当日はインターネットにつながらない前提なので、保存済みのファイルを最優先で使う。
+ * 当日はインターネットにつながらないこともあるので、保存済みのファイルを最優先で使う。
  */
 
 import { build, files, prerendered, version } from '$service-worker';
@@ -42,6 +42,8 @@ sw.addEventListener('fetch', (event) => {
 
 	const url = new URL(request.url);
 	if (url.origin !== sw.location.origin) return;
+	// API（STUN / TURN の情報など）は保存せず、毎回ネットワークに問い合わせる
+	if (url.pathname.startsWith(new URL('api/', sw.registration.scope).pathname)) return;
 
 	event.respondWith(
 		(async () => {

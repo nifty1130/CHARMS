@@ -5,6 +5,7 @@
  */
 
 export { PeerLink } from './link';
+export { hasIceServers, waitForGathering, type GatheringOptions } from './gathering';
 export { base45Decode, base45Encode } from './base45';
 export { decodePacket, encodePacket, packetFromQrText, packetToQrText } from './packet';
 export { compareFingerprints, formatFingerprint, generateVerificationCode } from './fingerprint';

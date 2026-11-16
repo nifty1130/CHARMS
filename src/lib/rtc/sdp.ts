@@ -12,7 +12,7 @@ import { addressRank } from './address';
 import { CANDIDATE_PRIORITIES } from './constants';
 import { formatFingerprint, parseFingerprint } from './fingerprint';
 import { isValidIceCredential } from './packet';
-import type { SignalCandidate, SignalPacket, TcpType } from './types';
+import type { CandidateKind, SignalCandidate, SignalPacket, TcpType } from './types';
 
 /** ブラウザが作った SDP から取り出した情報 */
 export interface LocalDescriptionInfo {
@@ -42,7 +42,7 @@ export function parseCandidateLine(line: string): SignalCandidate | null {
 	// コンポーネント 1（RTP）だけを使う。BUNDLE + rtcp-mux なので 2 は不要
 	if (component !== '1') return null;
 	if (protocol !== 'udp' && protocol !== 'tcp') return null;
-	if (kind !== 'host' && kind !== 'srflx') return null;
+	if (kind !== 'host' && kind !== 'srflx' && kind !== 'relay') return null;
 	if (port < 1 || port > 0xffff) return null;
 	if (addressRank(address) === null) return null;
 
@@ -57,16 +57,22 @@ export function parseCandidateLine(line: string): SignalCandidate | null {
 /**
  * QR に入れる候補を選ぶ
  *
- * UDP だけに絞り、つながりやすい順（IPv4 → mDNS → IPv6）に並べて上限数まで残す。
+ * UDP だけに絞り、種類ごとに枠を分けて上限数まで残す。
+ *
+ * - `relay`（中継）と `srflx`（ルーターの外側）は、それぞれ1つあれば役目を果たすので1枠ずつ
+ * - 残りの枠は `host`（端末自身）に、つながりやすい順（IPv4 → mDNS → IPv6）で割り当てる
+ * - 枠が余ったら、選ばなかった候補で埋める
+ *
  * 仮想ネットワークアダプタ（Hyper-V、Docker など）の候補も混ざるが、
  * ICE が全候補を試して届くものを自動で選ぶので、ここでは絞り込まない。
  *
  * @param candidates 収集した候補
  * @param max 残す数の上限
+ * @returns 選んだ候補（host → srflx → relay の順）
  */
 export function selectCandidates(candidates: SignalCandidate[], max: number): SignalCandidate[] {
 	const seen = new Set<string>();
-	return candidates
+	const ranked = candidates
 		.filter((c) => c.protocol === 'udp')
 		.filter((c) => {
 			const key = `${c.address}:${c.port}`;
@@ -76,8 +82,21 @@ export function selectCandidates(candidates: SignalCandidate[], max: number): Si
 		})
 		.map((candidate, index) => ({ candidate, index, rank: addressRank(candidate.address) ?? 99 }))
 		.sort((a, b) => a.rank - b.rank || a.index - b.index)
-		.slice(0, max)
 		.map((entry) => entry.candidate);
+
+	const ofKind = (kind: CandidateKind) => ranked.filter((c) => c.kind === kind);
+	const hosts = ofKind('host');
+	const reserved = [...ofKind('srflx').slice(0, 1), ...ofKind('relay').slice(0, 1)].slice(0, max);
+
+	const chosen = new Set<SignalCandidate>([...hosts.slice(0, max - reserved.length), ...reserved]);
+	for (const candidate of ranked) {
+		if (chosen.size >= max) break;
+		chosen.add(candidate);
+	}
+
+	const order: Record<CandidateKind, number> = { host: 0, srflx: 1, relay: 2 };
+	// sort は安定なので、同じ種類の中ではつながりやすい順が保たれる
+	return ranked.filter((c) => chosen.has(c)).sort((a, b) => order[a.kind] - order[b.kind]);
 }
 
 /**
@@ -163,15 +182,17 @@ export function buildCandidateInit(
 	mid: string
 ): RTCIceCandidateInit {
 	const priority =
-		candidate.kind === 'srflx'
-			? CANDIDATE_PRIORITIES.SRFLX
-			: candidate.protocol === 'udp'
-				? CANDIDATE_PRIORITIES.HOST_UDP
-				: CANDIDATE_PRIORITIES.HOST_TCP;
+		candidate.kind === 'relay'
+			? CANDIDATE_PRIORITIES.RELAY
+			: candidate.kind === 'srflx'
+				? CANDIDATE_PRIORITIES.SRFLX
+				: candidate.protocol === 'udp'
+					? CANDIDATE_PRIORITIES.HOST_UDP
+					: CANDIDATE_PRIORITIES.HOST_TCP;
 
 	// 同じ優先度だと順序が不定になるので、パケット内の順に少しずつ下げる
 	let line = `candidate:${index + 1} 1 ${candidate.protocol} ${priority - index} ${candidate.address} ${candidate.port} typ ${candidate.kind}`;
-	if (candidate.kind === 'srflx') {
+	if (candidate.kind !== 'host') {
 		// 元のアドレスは送っていないので、ダミーとして同じ値を入れる（ブラウザが必須とするため）
 		line += ` raddr ${candidate.address} rport ${candidate.port}`;
 	}

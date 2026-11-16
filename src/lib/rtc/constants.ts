@@ -34,13 +34,23 @@ export const IPV6_SIZE = 16;
 export const PORT_SIZE = 2;
 
 /** パケットに含める候補数の既定の上限 */
-export const DEFAULT_MAX_CANDIDATES = 4;
+export const DEFAULT_MAX_CANDIDATES = 6;
 
 /** 相手の情報を受け取ってから DataChannel が開くまでの既定の待ち時間（ミリ秒）。0 で無制限 */
 export const DEFAULT_CONNECT_TIMEOUT_MS = 0;
 
-/** ICE 候補の収集を待つ最大時間（ミリ秒） */
+/** ICE 候補の収集を待つ最大時間（ミリ秒）。STUN / TURN を使わないとき */
 export const GATHERING_TIMEOUT_MS = 10_000;
+
+/**
+ * STUN / TURN を使うときに、候補の収集を待つ最大時間（ミリ秒）
+ *
+ * サーバーに届かない経路（UDP が止められている など）があると収集が長引くので、短めに切り上げる。
+ */
+export const SERVER_GATHERING_TIMEOUT_MS = 4000;
+
+/** 中継用（relay）の候補が1つ届いてから、残りを待つ時間（ミリ秒） */
+export const GATHERING_SETTLE_MS = 400;
 
 /** DataChannel のラベル */
 export const CHANNEL_LABEL = 'charms';
@@ -52,7 +62,8 @@ export const CHANNEL_ID = 0;
 export const CANDIDATE_PRIORITIES = {
 	HOST_UDP: 2122260223,
 	HOST_TCP: 2105524223,
-	SRFLX: 1686052607
+	SRFLX: 1686052607,
+	RELAY: 41885695
 } as const;
 
 /**

@@ -15,17 +15,20 @@
  * 仕組み: 両方の端末が Offer を作り、互いに「相手は Answer を返した」ことにして接続する。
  * DTLS の役割はフィンガープリントの大小で決めるので、事前の打ち合わせは要らない。
  * ブラウザが作った SDP は書き換えない。
+ *
+ * STUN / TURN サーバーは既定では使わない（同じ LAN 内だけでつながる）。
+ * `prepare({ iceServers })` で渡すと、別のネットワークにいる端末ともつながるようになる。
  */
 
 import {
 	CHANNEL_ID,
 	CHANNEL_LABEL,
 	DEFAULT_CONNECT_TIMEOUT_MS,
-	DEFAULT_MAX_CANDIDATES,
-	GATHERING_TIMEOUT_MS
+	DEFAULT_MAX_CANDIDATES
 } from './constants';
 import { LinkError, LinkTimeoutError, SelfConnectionError } from './errors';
 import { compareFingerprints, generateVerificationCode } from './fingerprint';
+import { waitForGathering } from './gathering';
 import { decodePacket, packetFromQrText, packetToQrText } from './packet';
 import {
 	buildCandidateInit,
@@ -86,17 +89,21 @@ export class PeerLink {
 	/**
 	 * 自分の接続情報を集めて、QR を表示できる状態にする
 	 *
+	 * @param rtcConfig RTCPeerConnection に渡す設定（STUN / TURN サーバーなど）。省略すると LAN 内だけでつながる
 	 * @throws {@link LinkError} すでに呼び出し済み、または接続情報を集められなかった場合
 	 */
-	async prepare(): Promise<void> {
+	async prepare(rtcConfig: RTCConfiguration = {}): Promise<void> {
 		if (this.#state !== 'idle') {
 			throw new LinkError('prepare() は1回だけ呼べます', this.#state);
 		}
 		this.#setState('gathering');
 
 		try {
-			// LAN 専用なので STUN / TURN サーバーは使わない
-			const pc = new RTCPeerConnection({ iceServers: [], ...this.#options.rtcConfig });
+			const pc = new RTCPeerConnection({
+				iceServers: [],
+				...this.#options.rtcConfig,
+				...rtcConfig
+			});
 			this.#pc = pc;
 
 			// 両端で同じ ID を指定する「negotiated」チャネル。どちらも同じ手順で作れる
@@ -110,7 +117,7 @@ export class PeerLink {
 			this.#watchConnection(pc);
 
 			await pc.setLocalDescription(await pc.createOffer());
-			await this.#waitForGathering(pc);
+			await waitForGathering(pc);
 			if (this.#isClosed()) return;
 
 			const info = parseLocalDescription(pc.localDescription?.sdp ?? '');
@@ -316,28 +323,10 @@ export class PeerLink {
 				new LinkError(
 					this.#state === 'connected'
 						? '相手との接続が切れました'
-						: '相手の端末に届きませんでした。両方の端末が同じネットワークにつながっているか確認してください',
+						: '相手の端末に届きませんでした。両方の端末が同じネットワークにつながっているか、インターネットにつながっているかを確認してください',
 					this.#state
 				)
 			);
 		};
-	}
-
-	/** ICE 候補の収集が終わるまで待つ（時間切れでも、集まった分で先へ進む） */
-	#waitForGathering(pc: RTCPeerConnection): Promise<void> {
-		if (pc.iceGatheringState === 'complete') return Promise.resolve();
-
-		return new Promise((resolve) => {
-			const done = () => {
-				clearTimeout(timer);
-				pc.removeEventListener('icegatheringstatechange', onChange);
-				resolve();
-			};
-			const onChange = () => {
-				if (pc.iceGatheringState === 'complete') done();
-			};
-			const timer = setTimeout(done, GATHERING_TIMEOUT_MS);
-			pc.addEventListener('icegatheringstatechange', onChange);
-		});
 	}
 }
