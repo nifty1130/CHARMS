@@ -155,7 +155,7 @@ test('カメラが使えないときは、コードを貼り付けてつなげ�
 	// 違う文字を貼り付けても、分かる言葉で知らせて、そのまま続けられる
 	await host.locator('#partner-code').fill('https://example.com');
 	await host.getByRole('button', { name: 'このコードでつなぐ' }).click();
-	await expect(host.getByRole('alert').filter({ hasText: 'CHARMS の QR コードではありません' })).toBeVisible();
+	await expect(host.getByRole('alert').filter({ hasText: 'CHARM Point の QR コードではありません' })).toBeVisible();
 });
 
 test('録画はホストが許可したときだけでき、ファイルとして保存される', async ({ context }) => {

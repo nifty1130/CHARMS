@@ -44,7 +44,7 @@ describe('録画の表示用の整形', () => {
 	it('ファイル名に端末の名前と日時が入り、使えない文字は置き換える', () => {
 		const at = new Date(2026, 10, 16, 9, 5, 7);
 		expect(recordingFileName('体育館 カメラ/1', 'mp4', at)).toBe('体育館_カメラ_1_2026-11-16_09-05-07.mp4');
-		expect(recordingFileName('???', 'webm', at)).toBe('CHARMS_2026-11-16_09-05-07.webm');
+		expect(recordingFileName('???', 'webm', at)).toBe('CHARMPoint_2026-11-16_09-05-07.webm');
 	});
 
 	it('録画時間とデータ量を読みやすい形にする', () => {

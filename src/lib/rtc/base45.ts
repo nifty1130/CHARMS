@@ -49,7 +49,7 @@ export function base45Decode(text: string): Uint8Array {
 	for (const char of text) {
 		const digit = LOOKUP.get(char);
 		if (digit === undefined) {
-			throw new PacketDecodeError('CHARMS の QR コードではありません');
+			throw new PacketDecodeError('CHARM Point の QR コードではありません');
 		}
 		digits.push(digit);
 	}
@@ -63,7 +63,7 @@ export function base45Decode(text: string): Uint8Array {
 	for (; i + 2 < digits.length; i += 3) {
 		const value = digits[i] + digits[i + 1] * 45 + digits[i + 2] * 2025;
 		if (value > 0xffff) {
-			throw new PacketDecodeError('CHARMS の QR コードではありません');
+			throw new PacketDecodeError('CHARM Point の QR コードではありません');
 		}
 		out[offset++] = value >> 8;
 		out[offset++] = value & 0xff;
@@ -71,7 +71,7 @@ export function base45Decode(text: string): Uint8Array {
 	if (i < digits.length) {
 		const value = digits[i] + digits[i + 1] * 45;
 		if (value > 0xff) {
-			throw new PacketDecodeError('CHARMS の QR コードではありません');
+			throw new PacketDecodeError('CHARM Point の QR コードではありません');
 		}
 		out[offset++] = value;
 	}

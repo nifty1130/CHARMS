@@ -201,7 +201,7 @@
 </script>
 
 <svelte:head>
-	<title>テロップ — CHARMS</title>
+	<title>テロップ — CHARM Point</title>
 </svelte:head>
 
 <svelte:window onkeydown={onKeydown} />

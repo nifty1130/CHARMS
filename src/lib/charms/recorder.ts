@@ -27,7 +27,7 @@ export function pickRecordingFormat(): { mimeType: string; extension: string } |
 
 /** ファイル名に使えない文字を取り除く */
 function safeFileName(name: string): string {
-	return name.replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '') || 'CHARMS';
+	return name.replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '') || 'CHARMPoint';
 }
 
 /** 録画ファイルの名前を作る（例: カメラ1_2026-11-16_14-30-05.mp4） */

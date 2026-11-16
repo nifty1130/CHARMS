@@ -188,7 +188,7 @@
 </script>
 
 <svelte:head>
-	<title>カメラ — CHARMS</title>
+	<title>カメラ — CHARM Point</title>
 </svelte:head>
 
 <NodeShell {session} {role}>
