@@ -1,0 +1,26 @@
+// Cloudflare Workers への公開設定（npm run deploy で使う）
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "charmpoint",
+	"main": "worker/index.ts",
+	"compatibility_date": "2026-11-01",
+
+	// アプリ本体（npm run build の出力）。/api/ 以下だけを Worker が処理する
+	"assets": {
+		"directory": "./build",
+		"binding": "ASSETS",
+		"not_found_handling": "404-page",
+		"run_worker_first": ["/api/*"]
+	},
+
+	// 公開先。nifty1130.com が同じ Cloudflare アカウントにあれば、DNS と証明書は自動で設定される
+	"routes": [{ "pattern": "charmpoint.nifty1130.com", "custom_domain": true }],
+	"workers_dev": false,
+	"preview_urls": false,
+
+	"observability": { "enabled": true }
+
+	// TURN（中継）の鍵は、ここには書かずに「シークレット」として登録する:
+	//   npx wrangler secret put TURN_KEY_ID
+	//   npx wrangler secret put TURN_KEY_API_TOKEN
+}

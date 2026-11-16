@@ -1,10 +1,9 @@
 name: Deploy
 
-# main ブランチに入った内容を、GitHub Pages に公開する。
-# 公開された URL を各端末で一度開けば、当日はインターネットなしで使える。
+# main ブランチに入った内容を、Cloudflare Workers（https://charmpoint.nifty1130.com）に公開する。
 #
-# 公開するかどうかは、リポジトリの変数 DEPLOY_PAGES で決める（README の「公開の手順」を参照）。
-# 変数を設定していない間は、このワークフローは何もしない。
+# 自動で公開するかどうかは、リポジトリの変数 DEPLOY_CLOUDFLARE で決める（README の「公開の手順」を参照）。
+# 変数を設定していない間は、このワークフローは何もしない（手元から npm run deploy で公開する）。
 
 on:
   push:
@@ -13,17 +12,15 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  group: deploy
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: ビルド
-    if: ${{ vars.DEPLOY_PAGES == 'true' }}
+  deploy:
+    name: 公開
+    if: ${{ vars.DEPLOY_CLOUDFLARE == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,24 +32,12 @@ jobs:
 
       - run: npm ci
 
-      # GitHub Pages では https://<ユーザー名>.github.io/<リポジトリ名>/ で配信されるので、
-      # リポジトリ名をサブフォルダとして指定してビルドする
       - name: ビルド
         run: npm run build
+
+      # 公開先と設定は wrangler.jsonc にある
+      - name: Cloudflare に公開
+        run: npx wrangler deploy
         env:
-          BASE_PATH: /${{ github.event.repository.name }}
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: build
-
-  deploy:
-    name: 公開
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -4,6 +4,7 @@
  * ホストと1本の DataChannel でつながり、状況の受信と、映像接続の打ち合わせを行う。
  */
 
+import { cachedIceServers } from './ice';
 import { MediaLinks } from './media-links';
 import { Pairing } from './pairing.svelte';
 import {
@@ -80,6 +81,7 @@ export class ClientSession implements SwitcherApi {
 		this.role = role;
 		this.name = loadName(role);
 		this.media = new MediaLinks({
+			iceServers: cachedIceServers,
 			sendSignal: (toId, description) => this.#send({ type: 'signal', toId, description }),
 			onStreams: (streams) => {
 				this.streams = streams;

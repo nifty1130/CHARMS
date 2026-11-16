@@ -33,7 +33,7 @@
 			aria-label="役割の選択に戻る"
 		>
 			<span class="size-2.5 rounded-full bg-red-500"></span>
-			<span class="font-mono text-sm tracking-[0.2em]">CHARMS</span>
+			<span class="font-mono text-sm tracking-[0.15em]">CHARM Point</span>
 		</a>
 		{#if role}
 			<span class="text-zinc-700" aria-hidden="true">/</span>

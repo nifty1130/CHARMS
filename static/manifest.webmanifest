@@ -1,7 +1,7 @@
 {
-	"name": "CHARMS ExEx",
-	"short_name": "CHARMS",
-	"description": "校内 LAN だけで動く、映像の切り替えシステム",
+	"name": "CHARM Point",
+	"short_name": "CHARM Point",
+	"description": "ブラウザだけで動く、映像の切り替えシステム。インターネットのない LAN でも使えます",
 	"lang": "ja",
 	"start_url": ".",
 	"scope": ".",

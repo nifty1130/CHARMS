@@ -12,8 +12,14 @@ export const AddressFamily = {
 /** トランスポート層のプロトコル */
 export type CandidateProtocol = 'udp' | 'tcp';
 
-/** ICE 候補の種類（host: 端末自身のアドレス / srflx: STUN で得た外側のアドレス） */
-export type CandidateKind = 'host' | 'srflx';
+/**
+ * ICE 候補の種類
+ *
+ * - `host`: 端末自身のアドレス（同じ LAN 内でつながる）
+ * - `srflx`: STUN サーバーで調べた、ルーターの外側のアドレス
+ * - `relay`: TURN サーバーが用意した中継用のアドレス（直接つながらないときの最後の手段）
+ */
+export type CandidateKind = 'host' | 'srflx' | 'relay';
 
 /** TCP 候補の接続方式 */
 export type TcpType = 'passive' | 'active' | 'so';
@@ -66,11 +72,11 @@ export type LinkState =
 
 /** PeerLink の設定 */
 export interface PeerLinkOptions {
-	/** パケットに含める候補数の上限（既定: 4） */
+	/** パケットに含める候補数の上限（既定: 6） */
 	maxCandidates?: number;
 	/** 相手の情報を受け取ってから開通するまでの待ち時間（ミリ秒）。0 で無制限（既定: 0） */
 	connectTimeoutMs?: number;
-	/** RTCPeerConnection に渡す追加設定（LAN 専用なので既定では STUN/TURN なし） */
+	/** RTCPeerConnection に渡す追加設定（既定では STUN/TURN なし。`prepare()` の引数でも渡せる） */
 	rtcConfig?: RTCConfiguration;
 	/** 状態が変わったとき */
 	onStateChange?: (state: LinkState) => void;

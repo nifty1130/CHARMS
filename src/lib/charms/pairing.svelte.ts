@@ -5,6 +5,7 @@
  */
 
 import { LinkError, PacketDecodeError, PeerLink, SelfConnectionError, type LinkState } from '$lib/rtc';
+import { loadIceServers } from './ice';
 
 export interface PairingHandlers {
 	/** つながったとき */
@@ -57,7 +58,10 @@ export class Pairing {
 	start(): Promise<void> {
 		this.#starting ??= (async () => {
 			try {
-				await this.link.prepare();
+				// インターネットにつながっていれば STUN / TURN を使う（つながっていなければ LAN 内だけ）
+				const iceServers = await loadIceServers();
+				if (this.link.state !== 'idle') return;
+				await this.link.prepare({ iceServers });
 				this.qrText = this.link.qrText;
 			} catch (error) {
 				this.error = error instanceof Error ? error.message : String(error);

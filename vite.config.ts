@@ -5,8 +5,8 @@ import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 
-// GitHub Pages では https://<user>.github.io/CHARMsExEx/ のようにサブフォルダで配信されるため、
-// ビルド時に BASE_PATH=/CHARMsExEx を渡す。手元では空（ルート）のまま。
+// サブフォルダで配信する場合（例: https://example.com/charmpoint/）は、
+// ビルド時に BASE_PATH=/charmpoint を渡す。通常は空（ルート）のまま。
 const base = (process.env.BASE_PATH ?? '') as '' | `/${string}`;
 
 export default defineConfig(({ mode }) => ({
@@ -21,7 +21,7 @@ export default defineConfig(({ mode }) => ({
 				runes: ({ filename }) => (filename.split(/[/\\]/).includes('node_modules') ? undefined : true)
 			},
 
-			// サーバーを持たないアプリなので、静的ファイルとして書き出す。
+			// アプリ本体はサーバーの処理を持たないので、静的ファイルとして書き出す。
 			// 404.html は、存在しない URL を開いたときにアプリ本体へ戻すためのもの。
 			adapter: adapter({ fallback: '404.html' }),
 			paths: { base }
@@ -56,7 +56,7 @@ export default defineConfig(({ mode }) => ({
 				test: {
 					name: 'server',
 					environment: 'node',
-					include: ['src/**/*.{test,spec}.{js,ts}'],
+					include: ['src/**/*.{test,spec}.{js,ts}', 'worker/**/*.{test,spec}.ts'],
 					exclude: ['src/**/*.svelte.{test,spec}.{js,ts}']
 				}
 			}

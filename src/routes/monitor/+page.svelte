@@ -112,7 +112,7 @@
 </script>
 
 <svelte:head>
-	<title>モニター — CHARMS</title>
+	<title>モニター — CHARM Point</title>
 </svelte:head>
 
 <NodeShell {session} {role} bare hold={session.lost && !reconnecting}>

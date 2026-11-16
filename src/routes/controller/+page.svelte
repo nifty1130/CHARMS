@@ -10,7 +10,7 @@
 </script>
 
 <svelte:head>
-	<title>スイッチャー — CHARMS</title>
+	<title>スイッチャー — CHARM Point</title>
 </svelte:head>
 
 <NodeShell {session} {role}>

@@ -39,19 +39,19 @@
 </script>
 
 <svelte:head>
-	<title>CHARMS ExEx</title>
+	<title>CHARM Point</title>
 </svelte:head>
 
 <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 md:px-10 md:py-10">
 	<AppHeader>
-		<span class="tag hidden sm:inline">LAN だけで動く映像スイッチャー</span>
+		<span class="tag hidden sm:inline">ブラウザだけで動く映像スイッチャー</span>
 	</AppHeader>
 
 	<section class="py-8 md:py-10">
 		<h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">この端末の役割を選んでください</h1>
 		<p class="mt-3 max-w-3xl text-base leading-relaxed text-zinc-300">
 			まず1台を<strong class="font-semibold text-amber-300">ホスト</strong
-			>にします。ほかの端末は役割を選び、ホストと QR コードを見せ合うとつながります。インターネットは使いません。
+			>にします。ほかの端末は役割を選び、ホストと QR コードを見せ合うとつながります。インターネットのない場所でも使えます。
 		</p>
 	</section>
 

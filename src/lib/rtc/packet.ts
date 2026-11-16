@@ -13,7 +13,7 @@
  * | … | 7 または 19 ずつ | ICE 候補（フラグ1 + アドレス4/16 + ポート2）を0個以上 |
  *
  * 候補のフラグ: bit0-1 アドレス種別 / bit2 プロトコル（0=UDP, 1=TCP） /
- * bit3 種類（0=host, 1=srflx） / bit4-5 TCP 接続方式
+ * bit3 種類（0=host, 1=srflx） / bit4-5 TCP 接続方式 / bit6 中継（1=relay。bit3 より優先）
  */
 
 import { addressSize, decodeAddress, encodeAddress } from './address';
@@ -90,6 +90,7 @@ function encodeCandidate(candidate: SignalCandidate): number[] {
 		flags |= Math.max(0, TCP_TYPES.indexOf(candidate.tcpType ?? 'passive')) << 4;
 	}
 	if (candidate.kind === 'srflx') flags |= 1 << 3;
+	if (candidate.kind === 'relay') flags |= 1 << 6;
 
 	return [flags, ...address.bytes, candidate.port >> 8, candidate.port & 0xff];
 }
@@ -103,7 +104,7 @@ function encodeCandidate(candidate: SignalCandidate): number[] {
  */
 export function decodePacket(data: Uint8Array): SignalPacket {
 	if (data.length < HEADER_SIZE || data[0] !== MAGIC_BYTE) {
-		throw new PacketDecodeError('CHARMS の QR コードではありません');
+		throw new PacketDecodeError('CHARM Point の QR コードではありません');
 	}
 
 	const version = data[1] & VERSION_MASK;
@@ -154,7 +155,7 @@ export function decodePacket(data: Uint8Array): SignalPacket {
 		const candidate: SignalCandidate = {
 			address,
 			port,
-			kind: (flags >> 3) & 1 ? 'srflx' : 'host',
+			kind: (flags >> 6) & 1 ? 'relay' : (flags >> 3) & 1 ? 'srflx' : 'host',
 			protocol: (flags >> 2) & 1 ? 'tcp' : 'udp'
 		};
 		if (candidate.protocol === 'tcp') {

@@ -98,7 +98,7 @@
 </script>
 
 <svelte:head>
-	<title>ホスト — CHARMS</title>
+	<title>ホスト — CHARM Point</title>
 </svelte:head>
 
 <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 md:px-10 md:py-8">

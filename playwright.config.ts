@@ -6,7 +6,8 @@ import { defineConfig, devices } from '@playwright/test';
  * 本番と同じビルド結果を配信し、1つのブラウザの中でホストや各端末のページを同時に開いて、
  * つなぐ・映像を送る・切り替える、という一連の流れを確かめる。
  */
-const PORT = 4173;
+// Windows では、この番号が OS に予約されて使えない日がある。そのときは E2E_PORT=4373 のように変える
+const PORT = Number(process.env.E2E_PORT ?? 4173);
 
 export default defineConfig({
 	testDir: 'tests/e2e',
