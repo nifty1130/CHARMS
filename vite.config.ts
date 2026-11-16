@@ -19,6 +19,8 @@ export default defineConfig({
 			adapter: adapter()
 		})
 	],
+	// テスト実行中の再読み込み（不安定さの原因）を避けるため、依存を事前に最適化しておく
+	optimizeDeps: { include: ['ipaddr.js'] },
 	test: {
 		expect: { requireAssertions: true },
 		projects: [
