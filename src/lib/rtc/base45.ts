@@ -44,10 +44,7 @@ export function base45Encode(bytes: Uint8Array): string {
  * @throws {@link PacketDecodeError} Base45 として正しくない場合
  */
 export function base45Decode(text: string): Uint8Array {
-	if (text.length % 3 === 1) {
-		throw new PacketDecodeError('QR コードの内容が途中で切れています');
-	}
-
+	// 先に文字の種類を調べる（URL など無関係な QR を読んだときに、分かりやすい説明を出すため）
 	const digits: number[] = [];
 	for (const char of text) {
 		const digit = LOOKUP.get(char);
@@ -55,6 +52,9 @@ export function base45Decode(text: string): Uint8Array {
 			throw new PacketDecodeError('CHARMS の QR コードではありません');
 		}
 		digits.push(digit);
+	}
+	if (digits.length % 3 === 1) {
+		throw new PacketDecodeError('QR コードの内容が途中で切れています');
 	}
 
 	const out = new Uint8Array(Math.floor(digits.length / 3) * 2 + (digits.length % 3 === 2 ? 1 : 0));
