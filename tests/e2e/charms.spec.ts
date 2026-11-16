@@ -223,3 +223,40 @@ test('ホストが閉じても、モニターは映像を出し続け、つな�
 	await monitor.getByRole('button', { name: 'この端末のホストにつなぐ' }).click();
 	await expect(monitor.getByText('映像を待っています')).toBeVisible();
 });
+
+test('ホストの画面から端末を切断できる（確認つき）', async ({ context }) => {
+	const host = await openHost(context);
+	const monitor = await join(context, '/monitor/', 'モニター 1');
+
+	// 確認で「キャンセル」を選ぶと、切断しない
+	host.once('dialog', (dialog) => void dialog.dismiss());
+	await host.getByRole('button', { name: '切断' }).click();
+	await expect(host.getByText('1台とつながっています')).toBeVisible();
+
+	host.once('dialog', (dialog) => void dialog.accept());
+	await host.getByRole('button', { name: '切断' }).click();
+	await expect(host.getByText('0台とつながっています')).toBeVisible();
+	await expect(monitor.getByText(/ホストとの接続が切れました/)).toBeVisible();
+});
+
+test('一度開いたあとは、インターネットなしでも全ページを開ける', async ({ context, page }) => {
+	await page.goto('/');
+	// アプリ一式が端末に保存されるのを待つ
+	await expect(page.getByText('オフラインで使えます')).toBeVisible({ timeout: 30_000 });
+
+	await context.setOffline(true);
+	for (const [path, heading] of [
+		['/host/', '端末をつなぐ'],
+		['/camera/', 'ホストとつなぐ'],
+		['/admin/', 'ホストとつなぐ'],
+		['/monitor/', 'ホストとつなぐ'],
+		['/controller/', 'ホストとつなぐ'],
+		['/', 'この端末の役割を選んでください']
+	]) {
+		await page.goto(path);
+		await expect(page.getByRole('heading', { name: heading })).toBeVisible();
+	}
+	// QR コードの生成と読み取り用の部品も、保存済みのものだけで動く
+	await page.goto('/monitor/');
+	await expect(page.getByLabel('この端末の QR コード')).toBeVisible();
+});

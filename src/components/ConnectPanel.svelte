@@ -60,6 +60,16 @@
 		return ok;
 	}
 
+	let ownQr: HTMLElement | undefined = $state();
+
+	// 相手の QR を読み取ったら、次に見せる自分の QR が見える位置まで動かす。
+	// スマホでは QR が画面の下に隠れているので、探さなくて済むようにする。
+	$effect(() => {
+		if (pairing.scanned && pairing.state === 'connecting') {
+			ownQr?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		}
+	});
+
 	// カメラが使えないと分かったら、文字で受け渡す欄を自動で開く
 	$effect(() => {
 		if (camera === 'unavailable') manualOpen = true;
@@ -139,7 +149,7 @@
 
 	<div class="grid grid-cols-1 gap-px bg-zinc-800 md:grid-cols-2">
 		<!-- 自分の QR -->
-		<div class="flex flex-col bg-zinc-900 {side === 'node' ? 'md:order-2' : ''}">
+		<div class="flex flex-col bg-zinc-900 {side === 'node' ? 'order-2' : ''}">
 			<div class="flex items-baseline gap-3 border-b border-zinc-800 px-4 py-3">
 				<span class="font-mono text-2xl leading-none font-light text-zinc-500">
 					{side === 'host' ? '1' : '2'}
@@ -151,7 +161,7 @@
 				</h3>
 			</div>
 			<div class="flex flex-1 items-center justify-center p-4 sm:p-6">
-				<div class="w-full max-w-80">
+				<div class="w-full max-w-80" bind:this={ownQr}>
 					{#if pairing.qrText}
 						<QrCode data={pairing.qrText} />
 					{:else}
@@ -168,7 +178,7 @@
 		</div>
 
 		<!-- 相手の QR を読み取る -->
-		<div class="flex flex-col bg-zinc-900 {side === 'node' ? 'md:order-1' : ''}">
+		<div class="flex flex-col bg-zinc-900 {side === 'node' ? 'order-1' : ''}">
 			<div class="flex items-baseline gap-3 border-b border-zinc-800 px-4 py-3">
 				<span class="font-mono text-2xl leading-none font-light text-zinc-500">
 					{side === 'host' ? '2' : '1'}

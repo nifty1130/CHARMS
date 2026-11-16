@@ -66,6 +66,14 @@
 		renamingId = null;
 	}
 
+	/** 本番中に誤って押しても切れないよう、確認してから切断する */
+	function disconnect(node: NodeInfo) {
+		if (confirm(`「${node.name}」を切断しますか？
+もう一度つなぐには、QR コードの読み取りからやり直しになります。`)) {
+			host.disconnect(node.id);
+		}
+	}
+
 	function isSource(node: NodeInfo): boolean {
 		return node.role === 'camera' || node.role === 'admin';
 	}
@@ -187,7 +195,7 @@
 													<button
 														type="button"
 														class="btn btn-quiet text-xs hover:text-red-300"
-														onclick={() => host.disconnect(node.id)}
+														onclick={() => disconnect(node)}
 													>
 														切断
 													</button>
