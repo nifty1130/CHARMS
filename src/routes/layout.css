@@ -1,1 +1,70 @@
 @import 'tailwindcss';
+
+html,
+body {
+	background-color: #09090b; /* zinc-950 */
+	color: #f4f4f5; /* zinc-100 */
+	color-scheme: dark;
+	font-family:
+		'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Noto Sans JP', Meiryo, system-ui,
+		sans-serif;
+	-webkit-text-size-adjust: 100%;
+}
+
+/*
+ * 画面全体で使い回す部品
+ * 角は丸めず、線で区切る（放送機材のような見た目にそろえる）
+ */
+@layer components {
+	.btn {
+		@apply inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 border border-zinc-600 bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-100 transition-colors select-none;
+		@apply hover:border-zinc-400 hover:bg-zinc-800;
+		@apply focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-100;
+		@apply disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-zinc-600 disabled:hover:bg-zinc-900;
+	}
+
+	.btn-primary {
+		@apply border-zinc-100 bg-zinc-100 text-zinc-950;
+		@apply hover:border-white hover:bg-white disabled:hover:border-zinc-100 disabled:hover:bg-zinc-100;
+	}
+
+	.btn-danger {
+		@apply border-red-500 bg-red-600 text-white;
+		@apply hover:border-red-400 hover:bg-red-500 disabled:hover:border-red-500 disabled:hover:bg-red-600;
+	}
+
+	.btn-quiet {
+		@apply min-h-9 border-transparent bg-transparent px-2 py-1 text-zinc-400;
+		@apply hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-100;
+	}
+
+	.btn-on {
+		@apply border-zinc-100 bg-zinc-100 text-zinc-950 hover:border-white hover:bg-white;
+	}
+
+	.panel {
+		@apply border border-zinc-800 bg-zinc-900;
+	}
+
+	.panel-head {
+		@apply flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-zinc-800 px-4 py-3;
+	}
+
+	.panel-title {
+		@apply text-base font-semibold tracking-tight text-zinc-100;
+	}
+
+	/* 補足の小さなラベル（英字のコードなど） */
+	.tag {
+		@apply font-mono text-[11px] tracking-[0.14em] text-zinc-500 uppercase;
+	}
+
+	.field {
+		@apply min-h-11 w-full border border-zinc-700 bg-zinc-950 px-3 py-2 text-base text-zinc-100 placeholder:text-zinc-600;
+		@apply focus-visible:border-zinc-300 focus-visible:outline-none;
+	}
+
+	.hint {
+		@apply text-sm leading-relaxed text-zinc-400;
+	}
+}
