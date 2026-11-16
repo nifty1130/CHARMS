@@ -8,6 +8,7 @@
  * 2. その一覧で、外側のアドレス（srflx）と中継用のアドレス（relay）が取れるか
  * 3. 中継だけに限定しても、2つの接続がつながるか（TURN が実際に使えるか）
  * 4. アプリの画面で、ホストとカメラがつながり、映像が届くか
+ * 5. 一度開いた端末が、インターネットなしで開けるか
  */
 
 import { chromium } from '@playwright/test';
@@ -103,6 +104,25 @@ try {
 		.then(() => true)
 		.catch(() => false);
 	report('ホストに、カメラの確認用映像が届く', playing);
+
+	// 5. 一度開いた端末が、インターネットなしで開けるか
+	await page.goto(`${origin}/`);
+	const saved = await page
+		.getByText('オフラインで使えます')
+		.waitFor({ timeout: 30000 })
+		.then(() => true)
+		.catch(() => false);
+	report('アプリが端末に保存される', saved);
+	if (saved) {
+		await context.setOffline(true);
+		const offline = await page
+			.goto(`${origin}/camera/`)
+			.then(() => page.getByRole('heading', { name: 'ホストとつなぐ' }).waitFor({ timeout: 10000 }))
+			.then(() => true)
+			.catch(() => false);
+		report('インターネットなしでも、ページを開ける', offline);
+		await context.setOffline(false);
+	}
 } catch (error) {
 	report('途中でエラー', false, error instanceof Error ? error.message.split('\n')[0] : String(error));
 } finally {
