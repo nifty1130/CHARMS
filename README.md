@@ -20,7 +20,7 @@
   - カメラの画質変更・カメラ切替・マイクの消音・音質の切替を、手元から遠隔操作
   - モニターの音を、手元から出す・消す
   - 2つの映像を1台のモニターに出す: ワイプ（隅に小さく）、2画面（左右に並べる）、テロップ重ね（カメラ映像の上に文字だけを出す）
-  - カメラのズーム・ライトを遠隔操作（対応している端末のみ。主に Android の Chrome）
+  - カメラのズーム・ライトを遠隔操作（対応している端末のみ。Android と iPhone の実機で動作を確認）
   - カメラ担当への指示: 「寄って」「引いて」などの文字を、相手の画面に大きく表示する
   - インカム: スイッチャーの担当者の声を、カメラ担当のイヤホンに届ける
   - 全端末の録画を、まとめて始める・止める
@@ -96,7 +96,8 @@
 
 ## 動作環境
 
-- **ブラウザ**: PC の Chrome / Edge は、自動テストで動作を確認しています。Android の Chrome、Safari（iPhone・iPad・Mac）、Firefox は、標準の仕組みだけで作ってあるため動く見込みですが、**実機での確認はまだできていません**。
+- **ブラウザ**: PC（Windows）の Chrome / Edge、Android、iPhone で動作を確認しています（2026年11月。PC は自動テストでも確認）。iPad・Mac の Safari と Firefox は、標準の仕組みだけで作ってあるため動く見込みですが、実機での確認はまだです。
+- **実機で確認した使い方**: iPhone をスマホの回線、Windows（ホストとモニター）を学校のネットワークにつないだ状態で、合言葉でつながり、中継（TURN）経由で映像が届くこと。Android と iPhone の両方で、ズームとライトの遠隔操作が動くこと。
 - **ネットワーク**: 上の「ネットワークの選び方」を参照。
 - **台数の目安**: カメラ・モニターとも8台程度まで。カメラ端末の性能と画質の設定によります（[仕様書](docs/specification.md#8-画質と台数の目安)）。
 
@@ -160,15 +161,17 @@ npm run smoke -- https://charmpoint.nifty1130.com
 
 **TURN（中継）を有効にする（初回だけ）**
 
-TURN の鍵がなくてもアプリは動きます（STUN までを使います）。中継を使うには、Cloudflare で鍵を作って Worker に登録します。
+公開中の https://charmpoint.nifty1130.com は、設定済みです。自分の Cloudflare アカウントで公開し直すときだけ、この手順が要ります。TURN の鍵がなくてもアプリは動きます（STUN までを使います）。中継を使うには、Cloudflare で鍵を作って Worker に登録します。
 
 1. [Cloudflare のダッシュボード](https://dash.cloudflare.com/) → **Realtime** → **TURN Server** の **Create** で、TURN アプリを作る。
 2. 表示される **Turn Token ID** と **API Token** を、Worker のシークレットとして登録する（値はリポジトリに書かない）。
 
    ```sh
-   npx wrangler secret put TURN_KEY_ID          # Turn Token ID を貼り付ける
-   npx wrangler secret put TURN_KEY_API_TOKEN   # API Token を貼り付ける
+   npx wrangler secret put TURN_KEY_ID
+   npx wrangler secret put TURN_KEY_API_TOKEN
    ```
+
+   コマンドは、この文字のまま実行します（`TURN_KEY_ID` などは登録する名前で、値に置き換えない）。実行すると「Enter a secret value」と聞かれるので、そこに値を貼り付けます。1つ目に Turn Token ID、2つ目に API Token です。貼り付けても画面には表示されません。
 
 3. `npm run smoke -- https://charmpoint.nifty1130.com` で「中継（TURN）だけでつながる」が ✓ になることを確かめる。
 
