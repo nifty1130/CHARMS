@@ -62,6 +62,17 @@
 		mixer?.setProgram(id ? (videos[id] ?? null) : null, id ? (session.streams[id] ?? null) : null);
 	});
 
+	// 音を出しているかどうかを、ホストとスイッチャーに知らせる
+	$effect(() => {
+		const sound = soundOn;
+		if (session.connected) session.setStatus({ sound });
+	});
+
+	// スイッチャーからの遠隔操作を受ける
+	session.onMonitorCommand = (command) => {
+		if (command.action === 'sound') soundOn = command.on;
+	};
+
 	// つながり直したら、つなぎ直しの画面を閉じる
 	$effect(() => {
 		if (session.connected) reconnecting = false;

@@ -5,11 +5,7 @@
  * ホストは自分で処理し、スイッチャーはホストに依頼する、という違いだけを吸収する。
  */
 
-import type {
-	CameraCommand,
-	MonitorTarget,
-	SessionSnapshot
-} from './protocol';
+import type { CameraCommand, MonitorCommand, MonitorTarget, SessionSnapshot } from './protocol';
 
 export interface SwitcherApi {
 	/** いまの状況（端末の一覧、各モニターに映している映像、設定） */
@@ -24,4 +20,6 @@ export interface SwitcherApi {
 	rename(id: string, name: string): void;
 	/** カメラを遠隔操作する */
 	cameraControl(targetId: string, command: CameraCommand): void;
+	/** モニターを遠隔操作する */
+	monitorControl(targetId: string, command: MonitorCommand): void;
 }

@@ -4,8 +4,15 @@
 	import RecordControl from '../../components/RecordControl.svelte';
 	import TallyBanner from '../../components/TallyBanner.svelte';
 	import VideoView from '../../components/VideoView.svelte';
+	import {
+		AUDIO_MODES,
+		AUDIO_MODE_ORDER,
+		DEFAULT_AUDIO_MODE,
+		LevelMeter,
+		audioConstraints
+	} from '$lib/charms/audio';
 	import { ClientSession } from '$lib/charms/client.svelte';
-	import { HOST_ID, type QualityId } from '$lib/charms/protocol';
+	import { HOST_ID, type AudioMode, type QualityId } from '$lib/charms/protocol';
 	import {
 		DEFAULT_QUALITY,
 		QUALITY_ORDER,
@@ -26,12 +33,31 @@
 	let cameras = $state.raw<MediaDeviceInfo[]>([]);
 	let cameraId = $state<string | undefined>(undefined);
 	let quality = $state<QualityId>(DEFAULT_QUALITY);
+	/** この端末に付いているマイクの一覧 */
+	let mics = $state.raw<MediaDeviceInfo[]>([]);
+	let micId = $state<string | undefined>(undefined);
+	/** 音声の送り方（端末に覚えさせておく） */
+	let audioMode = $state<AudioMode>(loadAudioMode());
+	let muted = $state(false);
+	/** マイクの音量（0〜1） */
+	let level = $state(0);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 
 	const canShareScreen =
 		typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia;
 
+	const AUDIO_MODE_KEY = 'charms:camera:audio-mode';
+
+	function loadAudioMode(): AudioMode {
+		try {
+			return localStorage.getItem('charms:camera:audio-mode') === 'music' ? 'music' : DEFAULT_AUDIO_MODE;
+		} catch {
+			return DEFAULT_AUDIO_MODE;
+		}
+	}
+
+	const hasAudio = $derived((stream?.getAudioTracks().length ?? 0) > 0);
 	const tally = $derived(tallyFor(session.id, session.snapshot.routes));
 	const preset = $derived(QUALITY_PRESETS[quality]);
 	/** 本番用の映像を送っているモニターの数 */
@@ -42,11 +68,43 @@
 	);
 	const tooMany = $derived(monitorCount > preset.recommendedMonitors);
 
+	// 前回選んだ音声の送り方を、映像接続にも伝えておく
+	void session.media.setAudioMode(loadAudioMode());
+
 	// スイッチャーからの遠隔操作を受ける
 	session.onCameraCommand = (command) => {
-		if (command.action === 'quality') void changeQuality(command.quality);
-		else void flipCamera();
+		switch (command.action) {
+			case 'quality':
+				void changeQuality(command.quality);
+				break;
+			case 'flip':
+				void flipCamera();
+				break;
+			case 'mute':
+				setMuted(command.muted);
+				break;
+			case 'audio_mode':
+				void changeAudio({ mode: command.mode });
+				break;
+		}
 	};
+
+	// 消音は、マイクを閉じずに「音を送らない」状態にする（解除したとき、すぐ音が戻る）
+	$effect(() => {
+		const enabled = !muted;
+		stream?.getAudioTracks().forEach((track) => (track.enabled = enabled));
+	});
+
+	// マイクに音が入っているかを、メーターで見せる
+	$effect(() => {
+		const current = stream;
+		if (!current || current.getAudioTracks().length === 0) {
+			level = 0;
+			return;
+		}
+		const meter = new LevelMeter(current, (value) => (level = value));
+		return () => meter.destroy();
+	});
 
 	onDestroy(() => stopTracks(stream));
 
@@ -60,7 +118,10 @@
 			live: stream !== null,
 			quality,
 			sourceKind: sourceKind ?? undefined,
-			canFlip: sourceKind === 'webcam' && cameras.length > 1
+			canFlip: sourceKind === 'webcam' && cameras.length > 1,
+			hasAudio: (stream?.getAudioTracks().length ?? 0) > 0,
+			muted,
+			audioMode
 		});
 	}
 
@@ -86,7 +147,7 @@
 		video.contentHint = kind === 'screen' ? 'detail' : 'motion';
 		// 画面共有を「共有を停止」で止めたときなど、映像が終わったら送り出しも止める
 		video.addEventListener('ended', () => {
-			if (stream === next) void stopSource();
+			if (stream?.getVideoTracks()[0] === video) void stopSource();
 		});
 
 		stream = next;
@@ -106,16 +167,26 @@
 			const video = videoConstraints(quality, deviceId);
 			let next: MediaStream;
 			try {
-				next = await navigator.mediaDevices.getUserMedia({ video, audio: true });
+				next = await navigator.mediaDevices.getUserMedia({
+					video,
+					audio: audioConstraints(audioMode, micId)
+				});
 			} catch (cause) {
 				if (cause instanceof DOMException && cause.name === 'NotAllowedError') throw cause;
-				// マイクがない端末では、映像だけで続ける
-				next = await navigator.mediaDevices.getUserMedia({ video });
+				try {
+					// 前に選んだマイクが外されていたときは、既定のマイクで試す
+					next = await navigator.mediaDevices.getUserMedia({ video, audio: audioConstraints(audioMode) });
+				} catch {
+					// マイクがない端末では、映像だけで続ける
+					next = await navigator.mediaDevices.getUserMedia({ video });
+				}
 			}
 
 			const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
 			cameras = devices.filter((device) => device.kind === 'videoinput');
+			mics = devices.filter((device) => device.kind === 'audioinput');
 			cameraId = next.getVideoTracks()[0]?.getSettings().deviceId;
+			micId = next.getAudioTracks()[0]?.getSettings().deviceId;
 			await useStream(next, 'webcam');
 		} catch (cause) {
 			error = explain(cause);
@@ -166,6 +237,59 @@
 			await session.media.setLocalStream(stream);
 		}
 		report();
+	}
+
+	function setMuted(value: boolean) {
+		muted = value;
+		report();
+	}
+
+	/**
+	 * 音声の送り方、または使うマイクを変える
+	 *
+	 * 映像はそのままで、マイクだけを開き直す。
+	 */
+	async function changeAudio(options: { mode?: AudioMode; deviceId?: string }) {
+		const mode = options.mode ?? audioMode;
+		const deviceId = options.deviceId ?? micId;
+		if (mode === audioMode && deviceId === micId) return;
+		audioMode = mode;
+		try {
+			localStorage.setItem(AUDIO_MODE_KEY, mode);
+		} catch {
+			// 保存できない環境では、次に開いたときに「会話向け」に戻るだけ
+		}
+
+		if (stream && sourceKind === 'webcam') {
+			busy = true;
+			error = null;
+			try {
+				// 同時に2つのマイクを開けない端末があるので、先にいまのマイクを閉じる
+				stream.getAudioTracks().forEach((track) => track.stop());
+				let audio: MediaStreamTrack[] = [];
+				for (const constraints of [audioConstraints(mode, deviceId), audioConstraints(mode)]) {
+					try {
+						audio = (await navigator.mediaDevices.getUserMedia({ audio: constraints })).getAudioTracks();
+						break;
+					} catch {
+						// 次の条件で試す
+					}
+				}
+				if (audio.length === 0) error = 'マイクを使えませんでした。映像だけを送ります。';
+				const next = new MediaStream([...stream.getVideoTracks(), ...audio]);
+				micId = audio[0]?.getSettings().deviceId;
+				stream = next;
+				await session.media.setLocalStream(next);
+			} finally {
+				busy = false;
+			}
+		}
+		await session.media.setAudioMode(mode);
+		report();
+	}
+
+	function micLabel(mic: MediaDeviceInfo, index: number): string {
+		return mic.label || `マイク ${index + 1}`;
 	}
 
 	/** 次のカメラに切り替える（前面 ↔ 背面など） */
@@ -243,6 +367,9 @@
 				<VideoView {stream} fit="contain" class="aspect-video w-full" />
 				<div class="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-zinc-800 px-4 py-2 text-sm text-zinc-400">
 					<span class="text-zinc-200">{sourceKind === 'screen' ? '画面を共有中' : 'カメラで撮影中'}</span>
+					{#if hasAudio && muted}
+						<span class="font-medium text-amber-300">マイク消音中</span>
+					{/if}
 					<span>送り先: {session.targets.length > 0 ? session.targets.map(targetName).join('、') : 'まだありません'}</span>
 				</div>
 			</section>
@@ -275,6 +402,95 @@
 							「モニター◯台まで」は、性能の低い端末での目安です。送り先が増えるほど、この端末の負担が大きくなります。
 						{/if}
 					</p>
+				</section>
+
+				<section class="panel" aria-label="音声">
+					<div class="panel-head">
+						<h2 class="panel-title">音声</h2>
+						{#if hasAudio}
+							<button
+								type="button"
+								class="btn min-h-9 px-3 py-1 {muted ? 'btn-danger' : ''}"
+								aria-pressed={muted}
+								onclick={() => setMuted(!muted)}
+							>
+								{muted ? '消音を解除する' : 'マイクを消音する'}
+							</button>
+						{/if}
+					</div>
+					{#if hasAudio}
+						<div class="space-y-3 p-4">
+							<div>
+								<div class="flex items-baseline justify-between text-sm text-zinc-300">
+									<span>{sourceKind === 'screen' ? '画面の音の大きさ' : 'マイクの音の大きさ'}</span>
+									<span class="text-xs text-zinc-500">
+										{muted ? '消音中' : level > 0.92 ? '大きすぎます' : level < 0.02 ? '音が入っていません' : ''}
+									</span>
+								</div>
+								<div
+									class="mt-1 h-3 w-full overflow-hidden bg-zinc-800"
+									role="meter"
+									aria-label="音の大きさ"
+									aria-valuemin={0}
+									aria-valuemax={100}
+									aria-valuenow={Math.round(level * 100)}
+								>
+									<div
+										class="h-full {level > 0.92 ? 'bg-red-500' : level > 0.75 ? 'bg-amber-400' : 'bg-emerald-400'}"
+										style:width="{Math.round(level * 100)}%"
+									></div>
+								</div>
+							</div>
+
+							<div>
+								<span class="text-sm text-zinc-300">音の送り方</span>
+								<div class="mt-1 grid grid-cols-2 gap-px bg-zinc-800">
+									{#each AUDIO_MODE_ORDER as id (id)}
+										{@const item = AUDIO_MODES[id]}
+										<button
+											type="button"
+											class="flex cursor-pointer flex-col items-center gap-0.5 px-2 py-2.5 text-center transition-colors disabled:cursor-not-allowed disabled:opacity-50 {audioMode === id
+												? 'bg-zinc-100 text-zinc-950'
+												: 'bg-zinc-900 text-zinc-100 hover:bg-zinc-800'}"
+											aria-pressed={audioMode === id}
+											disabled={busy}
+											onclick={() => changeAudio({ mode: id })}
+										>
+											<span class="text-base font-semibold">{item.label}</span>
+											<span class="text-xs opacity-70">{item.detail}</span>
+										</button>
+									{/each}
+								</div>
+								{#if audioMode === 'music'}
+									<p class="hint mt-2">
+										演奏や歌を送るときに使います。この端末の近くでモニターの音を出すと、音が回り込んでハウリングすることがあります。
+									</p>
+								{/if}
+							</div>
+
+							{#if sourceKind === 'webcam' && mics.length > 1}
+								<label class="block">
+									<span class="text-sm text-zinc-300">使うマイク</span>
+									<select
+										class="field mt-1"
+										value={micId}
+										disabled={busy}
+										onchange={(event) => changeAudio({ deviceId: event.currentTarget.value })}
+									>
+										{#each mics as mic, index (mic.deviceId)}
+											<option value={mic.deviceId}>{micLabel(mic, index)}</option>
+										{/each}
+									</select>
+								</label>
+							{/if}
+						</div>
+					{:else}
+						<p class="hint p-4">
+							{sourceKind === 'screen'
+								? '共有している画面には音が付いていません。音も送りたいときは、共有を始めるときに「音声も共有」を選んでください。'
+								: 'マイクが使えないため、映像だけを送っています。'}
+						</p>
+					{/if}
 				</section>
 
 				<section class="panel space-y-3 p-4">

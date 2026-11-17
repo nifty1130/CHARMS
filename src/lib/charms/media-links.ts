@@ -9,8 +9,9 @@
  */
 
 import { waitForGathering } from '$lib/rtc';
+import { allowStereoReceive, AUDIO_MODES, DEFAULT_AUDIO_MODE, tuneOpusAnswer } from './audio';
 import { QUALITY_PRESETS, THUMBNAIL } from './quality';
-import type { LinkProfile, QualityId } from './protocol';
+import type { AudioMode, LinkProfile, QualityId } from './protocol';
 
 /** STUN / TURN を使わないときに、候補の収集を待つ最大時間（LAN 内なら通常は一瞬で終わる） */
 const LAN_GATHERING_TIMEOUT_MS = 2000;
@@ -50,6 +51,7 @@ export class MediaLinks {
 	readonly #incoming = new Map<string, Incoming>();
 	#stream: MediaStream | null = null;
 	#quality: QualityId = 'medium';
+	#audioMode: AudioMode = DEFAULT_AUDIO_MODE;
 
 	constructor(options: MediaLinksOptions) {
 		this.#options = options;
@@ -58,6 +60,28 @@ export class MediaLinks {
 	/** いま映像を送っている相手の ID */
 	get targets(): string[] {
 		return [...this.#outgoing.keys()];
+	}
+
+	/**
+	 * いま張っている映像接続の一覧（通信の状態を調べるときに使う）
+	 *
+	 * `direction` は、この端末から見て送っている（out）か、受けている（in）か。
+	 */
+	connections(): { peerId: string; direction: 'in' | 'out'; profile: LinkProfile | null; pc: RTCPeerConnection }[] {
+		return [
+			...[...this.#outgoing].map(([peerId, link]) => ({
+				peerId,
+				direction: 'out' as const,
+				profile: link.profile,
+				pc: link.pc
+			})),
+			...[...this.#incoming].map(([peerId, link]) => ({
+				peerId,
+				direction: 'in' as const,
+				profile: null,
+				pc: link.pc
+			}))
+		];
 	}
 
 	// ---- 送る側 ----
@@ -90,6 +114,22 @@ export class MediaLinks {
 	}
 
 	/**
+	 * 音声の送り方（会話向け / 音楽向け）を変える
+	 *
+	 * 音声の圧縮の条件は接続を張るときに決まるので、音声を送っている相手とは接続を張り直す
+	 * （相手の映像と音が一瞬途切れる）。
+	 */
+	async setAudioMode(mode: AudioMode): Promise<void> {
+		if (this.#audioMode === mode) return;
+		this.#audioMode = mode;
+		await Promise.all(
+			[...this.#outgoing]
+				.filter(([, link]) => link.audio !== null)
+				.map(([targetId, link]) => this.offerTo(targetId, link.profile))
+		);
+	}
+
+	/**
 	 * 相手へ映像を送り始める（ホストから指示されたときに呼ぶ）
 	 *
 	 * @param targetId 送り先の端末の ID
@@ -112,7 +152,11 @@ export class MediaLinks {
 		// 確認用の映像には音声を付けない（負荷と帯域の節約）
 		const audioTransceiver =
 			profile === 'program'
-				? pc.addTransceiver(audio ?? 'audio', { direction: 'sendonly', streams: [group] })
+				? pc.addTransceiver(audio ?? 'audio', {
+						direction: 'sendonly',
+						streams: [group],
+						sendEncodings: [{ maxBitrate: AUDIO_MODES[this.#audioMode].maxBitrate }]
+					})
 				: null;
 
 		const link: Outgoing = {
@@ -155,7 +199,12 @@ export class MediaLinks {
 			const link = this.#outgoing.get(fromId);
 			if (!link || link.pc.signalingState !== 'have-local-offer') return;
 			try {
-				await link.pc.setRemoteDescription(description);
+				// 音声を送る接続では、相手の条件を「いまの音声の送り方」に合わせて読み替える
+				const sdp =
+					link.audio && description.sdp
+						? tuneOpusAnswer(description.sdp, this.#audioMode)
+						: description.sdp;
+				await link.pc.setRemoteDescription({ type: 'answer', sdp });
 			} catch {
 				if (this.#outgoing.get(fromId) !== link) return;
 				this.#closeOutgoing(fromId);
@@ -188,7 +237,14 @@ export class MediaLinks {
 
 		try {
 			await pc.setRemoteDescription(description);
-			await pc.setLocalDescription(await pc.createAnswer());
+			const answer = await pc.createAnswer();
+			try {
+				// 音楽向けの音声をステレオで受け取れるように、その旨を Answer に書き足す
+				await pc.setLocalDescription({ type: 'answer', sdp: allowStereoReceive(answer.sdp ?? '') });
+			} catch {
+				// 書き足しを受け付けないブラウザでは、そのままの Answer を使う（モノラルで受け取る）
+				await pc.setLocalDescription(answer);
+			}
 			await gather(pc);
 			if (this.#incoming.get(fromId) !== link || !pc.localDescription) return;
 			this.#options.sendSignal(fromId, pc.localDescription.toJSON());

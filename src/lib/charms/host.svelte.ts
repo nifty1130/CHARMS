@@ -34,6 +34,7 @@ import {
 	type CameraCommand,
 	type ClientMessage,
 	type HostMessage,
+	type MonitorCommand,
 	type MonitorTarget,
 	type NodeInfo,
 	type NodeRole,
@@ -353,6 +354,12 @@ export class HostSession implements SwitcherApi {
 		entry.pairing.send({ type: 'camera_control', command } satisfies HostMessage);
 	}
 
+	monitorControl(targetId: string, command: MonitorCommand): void {
+		const entry = this.#nodes.get(targetId);
+		if (!entry || entry.info.role !== 'monitor') return;
+		entry.pairing.send({ type: 'monitor_control', command } satisfies HostMessage);
+	}
+
 	// ---- ホストだけができる操作 ----
 
 	/** 録画を許可するかどうかを切り替える */
@@ -421,6 +428,12 @@ export class HostSession implements SwitcherApi {
 				if (message.quality) info.quality = message.quality;
 				if (message.sourceKind) info.sourceKind = message.sourceKind;
 				if (typeof message.canFlip === 'boolean') info.canFlip = message.canFlip;
+				if (typeof message.hasAudio === 'boolean') info.hasAudio = message.hasAudio;
+				if (typeof message.muted === 'boolean') info.muted = message.muted;
+				if (message.audioMode === 'voice' || message.audioMode === 'music') {
+					info.audioMode = message.audioMode;
+				}
+				if (typeof message.sound === 'boolean') info.sound = message.sound;
 				entry.info = info;
 				this.#publish();
 				break;
@@ -439,6 +452,12 @@ export class HostSession implements SwitcherApi {
 			case 'camera_control':
 				if (entry.info.role === 'controller') {
 					this.cameraControl(message.targetId, message.command);
+				}
+				break;
+
+			case 'monitor_control':
+				if (entry.info.role === 'controller') {
+					this.monitorControl(message.targetId, message.command);
 				}
 				break;
 
