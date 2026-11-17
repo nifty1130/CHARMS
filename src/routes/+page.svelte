@@ -1,7 +1,9 @@
 <script lang="ts">
 	import AppHeader from '../components/AppHeader.svelte';
 	import RoleCard from '../components/RoleCard.svelte';
+	import { formatRoomCode, normalizeRoomCode } from '$lib/charms/room';
 	import { roles } from '$lib/roles';
+	import { onMount } from 'svelte';
 
 	/** ブラウザが出す「インストールできます」の合図（対応ブラウザのみ） */
 	interface InstallPromptEvent extends Event {
@@ -11,6 +13,12 @@
 
 	let installPrompt = $state<InstallPromptEvent | null>(null);
 	let offlineReady = $state(false);
+	/** 招待リンクから開いたときの合言葉 */
+	let room = $state<string | null>(null);
+
+	onMount(() => {
+		room = normalizeRoomCode(new URLSearchParams(location.search).get('room'));
+	});
 
 	$effect(() => {
 		const onPrompt = (event: Event) => {
@@ -49,10 +57,21 @@
 
 	<section class="py-8 md:py-10">
 		<h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">この端末の役割を選んでください</h1>
-		<p class="mt-3 max-w-3xl text-base leading-relaxed text-zinc-300">
-			まず1台を<strong class="font-semibold text-amber-300">ホスト</strong
-			>にします。ほかの端末は役割を選び、ホストと QR コードを見せ合うとつながります。インターネットのない場所でも使えます。
-		</p>
+		{#if room}
+			<p
+				class="mt-4 max-w-3xl border border-emerald-500/50 bg-emerald-500/10 px-4 py-3 text-base leading-relaxed text-emerald-100"
+				role="status"
+			>
+				<strong class="font-semibold">招待リンクから開きました（合言葉 {formatRoomCode(room)}）。</strong
+				>ホスト以外の役割を選ぶと、自動でホストにつながります。
+			</p>
+		{:else}
+			<p class="mt-3 max-w-3xl text-base leading-relaxed text-zinc-300">
+				まず1台を<strong class="font-semibold text-amber-300">ホスト</strong
+				>にします。ほかの端末は役割を選び、ホストの画面に出る合言葉を入力するか、QR
+				コードを見せ合うとつながります。QR コードなら、インターネットのない場所でも使えます。
+			</p>
+		{/if}
 	</section>
 
 	<section
@@ -60,12 +79,12 @@
 		class="grid grid-cols-1 gap-px border border-zinc-800 bg-zinc-800 sm:grid-cols-2 lg:grid-cols-5"
 	>
 		{#each roles as role (role.id)}
-			<RoleCard {role} class={role.id === 'host' ? 'sm:col-span-2 lg:col-span-1' : ''} />
+			<RoleCard {role} {room} class={role.id === 'host' ? 'sm:col-span-2 lg:col-span-1' : ''} />
 		{/each}
 	</section>
 
 	<section class="mt-10 grid grid-cols-1 gap-px border border-zinc-800 bg-zinc-800 md:grid-cols-3">
-		{#each [{ step: '1', title: 'ホストを1台開く', text: 'カメラ付きの PC で「ホスト」を選びます。本番が終わるまで、この画面は閉じません。' }, { step: '2', title: 'ほかの端末をつなぐ', text: 'それぞれの端末で役割を選び、ホストと QR コードを読み取り合います。1台あたり10秒ほどです。' }, { step: '3', title: '映像を切り替える', text: '「スイッチャー」かホストの画面で、どのカメラをどのモニターに映すかを選びます。' }] as item (item.step)}
+		{#each [{ step: '1', title: 'ホストを1台開く', text: 'カメラ付きの PC で「ホスト」を選びます。本番が終わるまで、この画面は閉じません。' }, { step: '2', title: 'ほかの端末をつなぐ', text: 'それぞれの端末で役割を選び、ホストの画面に出ている合言葉を入力します。インターネットのない場所では、QR コードを読み取り合います。' }, { step: '3', title: '映像を切り替える', text: '「スイッチャー」かホストの画面で、どのカメラをどのモニターに映すかを選びます。' }] as item (item.step)}
 			<div class="bg-zinc-900 p-5">
 				<div class="flex items-baseline gap-3">
 					<span class="font-mono text-3xl leading-none font-light text-zinc-600">{item.step}</span>

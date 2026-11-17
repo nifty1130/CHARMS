@@ -1,11 +1,13 @@
 <script lang="ts">
 	import type { ClientSession } from '$lib/charms/client.svelte';
 	import { LocalHostFinder } from '$lib/charms/local-pairing.svelte';
+	import { cleanName } from '$lib/charms/protocol';
 	import { confirmBeforeLeaving, keepScreenAwake } from '$lib/charms/wake-lock';
 	import type { Role } from '$lib/roles';
 	import { onDestroy, onMount, type Snippet } from 'svelte';
 	import AppHeader from './AppHeader.svelte';
 	import ConnectPanel from './ConnectPanel.svelte';
+	import RoomJoin from './RoomJoin.svelte';
 
 	/**
 	 * ホストにつなぐ端末（カメラ・テロップ・モニター・スイッチャー）に共通の外枠
@@ -31,9 +33,30 @@
 	let { session, role, children, bare = false, hold = false }: Props = $props();
 
 	const finder = new LocalHostFinder();
-	const showChildren = $derived(session.connected || hold);
+
+	/** 接続が切れて、合言葉で自動的につなぎ直している最中か */
+	const rejoining = $derived(
+		session.lost && !session.connected && !!session.room && !session.ended
+	);
+	/** 自動のつなぎ直しを待たずに、接続の画面を開いたか */
+	let manual = $state(false);
+
+	// 自動でつなぎ直している間は、役割の画面をそのまま出しておく
+	// （カメラの撮影や録画を止めずに済む）
+	const showChildren = $derived(session.connected || hold || (rejoining && !manual));
+
+	$effect(() => {
+		if (session.connected) manual = false;
+	});
 
 	onMount(() => {
+		// 招待リンクから開いたとき、または読み込み直したときは、自動でつなぐ
+		const params = new URLSearchParams(location.search);
+		const name = params.get('name');
+		// リンクで名前が指定されていれば、それを使う（配信ソフト用の出力リンクなど）
+		if (name) session.name = cleanName(name, session.name);
+		session.autoJoin(params.get('room'));
+
 		const releaseWake = keepScreenAwake();
 		const releaseGuard = confirmBeforeLeaving(() => session.connected);
 		return () => {
@@ -59,27 +82,68 @@
 		/>
 
 		{#if showChildren}
+			{#if rejoining}
+				<div
+					class="mt-4 flex flex-wrap items-center gap-3 border border-amber-500/50 bg-amber-500/10 px-4 py-3"
+					role="alert"
+				>
+					<span class="size-2.5 shrink-0 animate-pulse rounded-full bg-amber-400"></span>
+					<p class="min-w-0 flex-1 text-base text-amber-100">
+						<strong class="font-semibold">ホストとの接続が切れました。</strong
+						>自動でつなぎ直しています…
+					</p>
+					<button type="button" class="btn" onclick={() => (manual = true)}>
+						QR コードでつなぎ直す
+					</button>
+				</div>
+			{/if}
 			<div class="mt-6">
 				{@render children()}
 			</div>
 		{:else}
-			<div class="mt-6">
-				{#if session.lost}
-					<p class="mb-4 border border-red-500/50 bg-red-500/10 px-4 py-3 text-base text-red-100" role="alert">
-						<strong class="font-semibold">ホストとの接続が切れました。</strong
-						>もう一度、ホストと QR コードを読み取り合ってください。
+			<div class="mt-6 space-y-4">
+				{#if session.ended === 'replaced'}
+					<p class="border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-base text-amber-100" role="alert">
+						<strong class="font-semibold">この端末は、別の画面でつなぎ直されました。</strong
+						>この画面を使う場合は、もう一度つないでください。
+					</p>
+				{:else if session.ended === 'removed'}
+					<p class="border border-red-500/50 bg-red-500/10 px-4 py-3 text-base text-red-100" role="alert">
+						<strong class="font-semibold">ホストから切断されました。</strong
+						>もう一度つなぐには、合言葉を入力するか、ホストと QR コードを読み取り合ってください。
+					</p>
+				{:else if session.lost}
+					<p class="border border-red-500/50 bg-red-500/10 px-4 py-3 text-base text-red-100" role="alert">
+						<strong class="font-semibold">ホストとの接続が切れました。</strong>
+						{#if session.room}
+							自動でつなぎ直しています。うまくいかないときは、ホストと QR コードを読み取り合ってください。
+						{:else}
+							もう一度、合言葉を入力するか、ホストと QR コードを読み取り合ってください。
+						{/if}
 					</p>
 				{/if}
-				<h1 class="text-xl font-semibold tracking-tight">ホストとつなぐ</h1>
-				<p class="hint mt-1 mb-3">
-					ホストの画面で「端末を追加する」を開き、お互いの QR コードを読み取り合います。
-				</p>
-				<ConnectPanel
-					pairing={session.pairing}
-					side="node"
-					{finder}
-					onRestart={() => session.restartPairing()}
-				/>
+
+				<div>
+					<h1 class="text-xl font-semibold tracking-tight">ホストとつなぐ</h1>
+					<p class="hint mt-1">
+						ホストの画面に出ている合言葉を入力するか、お互いの QR コードを読み取り合います。
+					</p>
+				</div>
+
+				<RoomJoin {session} />
+
+				<div>
+					<h2 class="mb-1 text-base font-semibold">QR コードでつなぐ（インターネットがなくても使えます）</h2>
+					<p class="hint mb-3">
+						ホストの画面の「QR コードでつなぐ」を見ながら、お互いの QR コードを読み取り合います。
+					</p>
+					<ConnectPanel
+						pairing={session.pairing}
+						side="node"
+						{finder}
+						onRestart={() => session.restartPairing()}
+					/>
+				</div>
 			</div>
 		{/if}
 	</div>

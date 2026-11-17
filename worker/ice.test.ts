@@ -56,6 +56,13 @@ describe('buildIceResponse', () => {
 		expect(text).not.toContain('key-id');
 	});
 
+	it('自動テスト用の設定では、空の一覧を返す', async () => {
+		const fetcher = cloudflare({});
+		const result = await buildIceResponse({ ...KEYS, ICE_DISABLED: 'true' }, fetcher);
+		expect(result.iceServers).toEqual([]);
+		expect(fetcher).not.toHaveBeenCalled();
+	});
+
 	it('TURN の発行に失敗しても、STUN だけで応答する', async () => {
 		expect((await buildIceResponse(KEYS, cloudflare({ error: 'x' }, 500))).relay).toBe(false);
 		expect((await buildIceResponse(KEYS, cloudflare({ iceServers: [] }))).relay).toBe(false);

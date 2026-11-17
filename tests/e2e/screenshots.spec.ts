@@ -35,7 +35,9 @@ test('画面写真を撮る', async ({ context }) => {
 	const host = await openHost(context);
 	await host.setViewportSize(DESKTOP);
 	await expect(host.getByLabel('この端末の QR コード')).toBeVisible();
+	await expect(host.getByTestId('room-code')).toBeVisible();
 	await shot(host, '02-host-connect');
+	await shot(host, '02-host-connect-full', true);
 
 	// スマホでの接続画面
 	const phone = await context.newPage();

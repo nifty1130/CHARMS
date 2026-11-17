@@ -4,15 +4,18 @@
 
 	interface Props {
 		role: Role;
+		/** 招待リンクから開いたときの合言葉（役割のページに引き継ぐ） */
+		room?: string | null;
 		class?: string;
 	}
 
-	let { role, class: className = '' }: Props = $props();
+	let { role, room = null, class: className = '' }: Props = $props();
 	const isHost = $derived(role.id === 'host');
+	const href = $derived(resolve(role.path) + (room && !isHost ? `?room=${room}` : ''));
 </script>
 
 <a
-	href={resolve(role.path)}
+	{href}
 	class="group relative flex h-full flex-col bg-zinc-900 outline-none transition-colors duration-200 hover:bg-zinc-800 focus-visible:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-zinc-100 focus-visible:ring-inset {className}"
 >
 	<!-- 上段: 英字の略号と台数 -->

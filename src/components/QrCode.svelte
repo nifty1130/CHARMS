@@ -7,10 +7,12 @@
 		data: string;
 		/** 描画する大きさ（ピクセル）。表示は親の幅に合わせて縮む */
 		size?: number;
+		/** 読み上げ用の説明 */
+		label?: string;
 		class?: string;
 	}
 
-	let { data, size = 640, class: className = '' }: Props = $props();
+	let { data, size = 640, label = 'この端末の QR コード', class: className = '' }: Props = $props();
 	let canvas: HTMLCanvasElement | undefined = $state();
 
 	$effect(() => {
@@ -35,5 +37,5 @@
 <canvas
 	bind:this={canvas}
 	class="block aspect-square h-auto w-full bg-white {className}"
-	aria-label="この端末の QR コード"
+	aria-label={label}
 ></canvas>
