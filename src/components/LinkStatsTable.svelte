@@ -28,8 +28,11 @@
 	function note(link: LinkStats): string {
 		const notes: string[] = [];
 		if (link.path === 'relay') notes.push('中継サーバー経由');
-		if (link.limitation === 'cpu') notes.push('端末の処理が追いつかず、画質を下げています');
-		if (link.limitation === 'bandwidth') notes.push('回線が細く、画質を下げています');
+		// 確認用の小さな映像は、意図して画質を絞っているので、本番用の映像についてだけ知らせる
+		if (link.profile === 'program') {
+			if (link.limitation === 'cpu') notes.push('端末の処理が追いつかず、画質を下げています');
+			if (link.limitation === 'bandwidth') notes.push('回線が細く、画質を下げています');
+		}
 		if ((link.lossPercent ?? 0) >= 5) notes.push('データが多く欠けています');
 		return notes.join('。');
 	}

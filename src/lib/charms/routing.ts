@@ -42,6 +42,7 @@ export function secondaryOf(route: Route | undefined): string | null {
  *
  * - 映像を出せる状態のカメラ・テロップ → ホストと全スイッチャー（確認用の小さな映像）
  * - 各モニターの本番・予告に選ばれた入力、重ねる映像 → そのモニター（本番用の映像）
+ * - インカムで話しているスイッチャー → 聞く設定にしているカメラ（声だけ）
  */
 export function desiredLinks(nodes: NodeInfo[], routes: Route[]): DesiredLink[] {
 	const live = new Set(nodes.filter((n) => isSourceRole(n.role) && n.live).map((n) => n.id));
@@ -61,6 +62,13 @@ export function desiredLinks(nodes: NodeInfo[], routes: Route[]): DesiredLink[] 
 			if (sourceId && live.has(sourceId)) {
 				links.push({ sourceId, sinkId: route.monitorId, profile: 'program' });
 			}
+		}
+	}
+	const listeners = nodes.filter((n) => isSourceRole(n.role) && n.listening);
+	for (const controller of controllers) {
+		if (!controller.talking) continue;
+		for (const listener of listeners) {
+			links.push({ sourceId: controller.id, sinkId: listener.id, profile: 'talk' });
 		}
 	}
 	return links;

@@ -49,6 +49,43 @@
 		if (session.connected) manual = false;
 	});
 
+	/** インカム: スイッチャーから届いている声 */
+	const talkback = $derived(
+		Object.entries(session.streams).filter(
+			([id]) => session.snapshot.nodes.find((node) => node.id === id)?.role === 'controller'
+		)
+	);
+
+	/** 届いた声を鳴らす */
+	function playVoice(element: HTMLAudioElement, stream: MediaStream) {
+		const attach = (next: MediaStream) => {
+			element.srcObject = next;
+			void element.play().catch(() => {});
+		};
+		attach(stream);
+		return {
+			update: attach,
+			destroy: () => {
+				element.srcObject = null;
+			}
+		};
+	}
+
+	// 指示が届いたら、端末を震わせて知らせ、しばらくしたら自動で消す
+	$effect(() => {
+		const cue = session.cue;
+		if (!cue) return;
+		try {
+			navigator.vibrate?.(200);
+		} catch {
+			// 震える機能のない端末
+		}
+		const timer = setTimeout(() => {
+			if (session.cue === cue) session.dismissCue();
+		}, 20_000);
+		return () => clearTimeout(timer);
+	});
+
 	onMount(() => {
 		// 招待リンクから開いたとき、または読み込み直したときは、自動でつなぐ
 		const params = new URLSearchParams(location.search);
@@ -70,6 +107,29 @@
 		session.destroy();
 	});
 </script>
+
+{#each talkback as [id, stream] (id)}
+	<audio use:playVoice={stream} autoplay></audio>
+{/each}
+
+{#if session.cue}
+	<div
+		class="fixed inset-x-0 top-0 z-50 flex flex-wrap items-center gap-4 bg-sky-600 px-5 py-4 text-white shadow-lg"
+		role="alert"
+	>
+		<div class="min-w-0 flex-1">
+			<div class="text-sm opacity-90">{session.cue.from} からの指示</div>
+			<div class="text-3xl leading-tight font-bold break-words sm:text-4xl">{session.cue.text}</div>
+		</div>
+		<button
+			type="button"
+			class="btn border-white/70 bg-white text-sky-900 hover:bg-sky-50"
+			onclick={() => session.dismissCue()}
+		>
+			了解
+		</button>
+	</div>
+{/if}
 
 {#if showChildren && bare}
 	{@render children()}

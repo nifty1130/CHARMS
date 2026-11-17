@@ -47,6 +47,10 @@
 	let zoom = $state.raw<ZoomInfo | null>(null);
 	/** ライトのあるカメラなら、点いているか（ないカメラでは null） */
 	let torch = $state<boolean | null>(null);
+	/** 録画の操作（スイッチャーからの一斉録画で使う） */
+	let recorder: RecordControl | undefined = $state();
+	/** インカム（スイッチャーの担当者の声）を聞くか */
+	let listening = $state(false);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 
@@ -97,6 +101,10 @@
 				break;
 			case 'torch':
 				void applyTorch(command.on);
+				break;
+			case 'record':
+				if (command.on) recorder?.remoteStart();
+				else recorder?.remoteStop();
 				break;
 		}
 	};
@@ -273,6 +281,11 @@
 		report();
 	}
 
+	function setListening(value: boolean) {
+		listening = value;
+		session.setStatus({ listening: value });
+	}
+
 	function setMuted(value: boolean) {
 		muted = value;
 		report();
@@ -438,6 +451,21 @@
 					</p>
 				</section>
 
+				<label class="panel flex cursor-pointer items-start gap-3 p-4">
+					<input
+						type="checkbox"
+						class="mt-1 size-5 accent-sky-500"
+						checked={listening}
+						onchange={(event) => setListening(event.currentTarget.checked)}
+					/>
+					<span>
+						<span class="text-base font-medium">インカムを聞く</span>
+						<span class="hint mt-0.5 block">
+							スイッチャーの担当者の声が、この端末から聞こえるようになります。声がマイクに入らないよう、イヤホンを付けてください。
+						</span>
+					</span>
+				</label>
+
 				<section class="panel" aria-label="音声">
 					<div class="panel-head">
 						<h2 class="panel-title">音声</h2>
@@ -591,6 +619,7 @@
 					/>
 					{#if session.snapshot.settings.allowRecording}
 						<RecordControl
+							bind:this={recorder}
 							getStream={() => stream}
 							label={session.name}
 							description="このカメラで撮ったままの映像を録画します"

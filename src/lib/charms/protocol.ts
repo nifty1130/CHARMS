@@ -33,8 +33,9 @@ export type AudioMode = 'voice' | 'music';
  *
  * - `thumbnail`: ホストやスイッチャーの画面に並べる小さな確認用映像（低画質・音声なし）
  * - `program`: モニターに映す本番用の映像（選んだ画質・音声あり）
+ * - `talk`: インカム。スイッチャーの声を、カメラ担当に届ける（音声のみ）
  */
-export type LinkProfile = 'thumbnail' | 'program';
+export type LinkProfile = 'thumbnail' | 'program' | 'talk';
 
 /**
  * モニターの画面の作り方
@@ -98,6 +99,10 @@ export interface NodeInfo {
 	torch?: boolean;
 	/** 通信の状態（映像接続があるときだけ） */
 	net?: NetInfo;
+	/** インカムで話しているか（スイッチャーのみ） */
+	talking?: boolean;
+	/** インカムを聞く設定にしているか（カメラのみ） */
+	listening?: boolean;
 }
 
 /**
@@ -142,10 +147,23 @@ export type CameraCommand =
 	| { action: 'mute'; muted: boolean }
 	| { action: 'audio_mode'; mode: AudioMode }
 	| { action: 'zoom'; value: number }
-	| { action: 'torch'; on: boolean };
+	| { action: 'torch'; on: boolean }
+	| { action: 'record'; on: boolean };
 
 /** スイッチャーからモニターへの遠隔操作 */
-export type MonitorCommand = { action: 'sound'; on: boolean };
+export type MonitorCommand = { action: 'sound'; on: boolean } | { action: 'record'; on: boolean };
+
+/** 指示メッセージの送り先。`'all'` は全部のカメラ・テロップ */
+export type CueTarget = string[] | 'all';
+
+/** 指示メッセージの最大文字数 */
+export const MAX_CUE_LENGTH = 60;
+
+/** 指示メッセージの文を整える（前後の空白を除き、長すぎる場合は切り詰める） */
+export function cleanCue(text: unknown): string {
+	if (typeof text !== 'string') return '';
+	return text.replace(/\s+/g, ' ').trim().slice(0, MAX_CUE_LENGTH);
+}
 
 /** 切り替えの対象にするモニター。`'all'` は全モニター */
 export type MonitorTarget = string[] | 'all';
@@ -182,6 +200,8 @@ export type ClientMessage =
 			zoom?: ZoomInfo | null;
 			torch?: boolean | null;
 			net?: NetInfo | null;
+			talking?: boolean;
+			listening?: boolean;
 	  }
 	| { type: 'route'; monitors: MonitorTarget; stage: 'program' | 'preview'; sourceId: string | null }
 	| { type: 'take'; monitors: MonitorTarget }
@@ -189,7 +209,9 @@ export type ClientMessage =
 	| { type: 'signal'; toId: string; description: RTCSessionDescriptionInit }
 	| { type: 'link_failed'; sourceId: string; sinkId: string }
 	| { type: 'camera_control'; targetId: string; command: CameraCommand }
-	| { type: 'monitor_control'; targetId: string; command: MonitorCommand };
+	| { type: 'monitor_control'; targetId: string; command: MonitorCommand }
+	| { type: 'cue'; targets: CueTarget; text: string }
+	| { type: 'record_all'; on: boolean };
 
 /** ホスト → 端末 */
 export type HostMessage =
@@ -200,7 +222,8 @@ export type HostMessage =
 	| { type: 'drop_link'; peerId: string }
 	| { type: 'signal'; fromId: string; description: RTCSessionDescriptionInit }
 	| { type: 'camera_control'; command: CameraCommand }
-	| { type: 'monitor_control'; command: MonitorCommand };
+	| { type: 'monitor_control'; command: MonitorCommand }
+	| { type: 'cue'; from: string; text: string };
 
 /** 役割ごとの ID の頭文字と、名前の初期値 */
 export const ROLE_DEFAULTS: Record<NodeRole, { prefix: string; label: string }> = {

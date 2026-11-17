@@ -145,17 +145,18 @@ function round1(value: number): number {
 /**
  * 映像接続1本の状態を、3段階で評価する
  *
- * - `poor`（不安定）: 欠けが 5% 以上、または遅延が 400 ミリ秒以上、またはコマ数が極端に少ない
- * - `fair`（やや不安定）: 欠けが 1% 以上、または遅延が 150 ミリ秒以上、または画質を下げて送っている
+ * - `poor`（不安定）: 欠けが 5% 以上、または遅延が 400 ミリ秒以上
+ * - `fair`（やや不安定）: 欠けが 1% 以上、または遅延が 150 ミリ秒以上
  * - `good`（良好）: それ以外
+ *
+ * コマ数や「画質を下げている理由」は、評価に使わない。動きのないテロップはコマ数が少なく、
+ * 確認用の小さな映像は意図して画質を絞っているので、正常でも異常に見えてしまうため。
  */
 export function gradeLink(link: LinkStats): NetInfo['quality'] {
 	const loss = link.lossPercent ?? 0;
 	const rtt = link.rttMs ?? 0;
-	// 確認用の小さな映像は、もともと毎秒10コマなので、それより十分少ないときだけ異常とみなす
-	const stalled = link.fps !== null && link.kbps !== null && link.fps < 5;
-	if (loss >= 5 || rtt >= 400 || stalled) return 'poor';
-	if (loss >= 1 || rtt >= 150 || link.limitation === 'cpu' || link.limitation === 'bandwidth') return 'fair';
+	if (loss >= 5 || rtt >= 400) return 'poor';
+	if (loss >= 1 || rtt >= 150) return 'fair';
 	return 'good';
 }
 

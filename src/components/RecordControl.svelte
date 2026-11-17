@@ -38,7 +38,7 @@
 		return () => clearInterval(timer);
 	});
 
-	async function start() {
+	async function start(remote = false) {
 		error = null;
 		const stream = getStream();
 		if (!stream) {
@@ -49,6 +49,8 @@
 		try {
 			const started = await startRecording(stream, {
 				label,
+				// 遠隔操作で始めるときは、保存先を選べない（止めたときにダウンロードする）
+				picker: !remote,
 				onProgress: (size) => (bytes = size),
 				onEnd: (cause) => {
 					recording = null;
@@ -85,6 +87,16 @@
 		onStopped?.();
 	}
 
+	/** スイッチャーからの「一斉に録画」で始める */
+	export function remoteStart(): void {
+		if (!recording && !busy && supported) void start(true);
+	}
+
+	/** スイッチャーからの「一斉に停止」で止める */
+	export function remoteStop(): void {
+		void stop();
+	}
+
 	onDestroy(() => {
 		void recording?.stop();
 	});
@@ -104,7 +116,7 @@
 			<span class="hint">止めたときにダウンロードされます。長時間の録画は PC の Chrome / Edge が安全です。</span>
 		{/if}
 	{:else}
-		<button type="button" class="btn" onclick={start} disabled={busy || !supported}>
+		<button type="button" class="btn" onclick={() => start()} disabled={busy || !supported}>
 			<span class="text-red-500" aria-hidden="true">●</span> 録画を始める
 		</button>
 		<span class="hint">

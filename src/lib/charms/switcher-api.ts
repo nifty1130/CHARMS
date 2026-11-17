@@ -7,6 +7,7 @@
 
 import type {
 	CameraCommand,
+	CueTarget,
 	Layout,
 	MonitorCommand,
 	MonitorTarget,
@@ -30,4 +31,8 @@ export interface SwitcherApi {
 	cameraControl(targetId: string, command: CameraCommand): void;
 	/** モニターを遠隔操作する */
 	monitorControl(targetId: string, command: MonitorCommand): void;
+	/** カメラ・テロップの担当者の画面に、指示を表示する */
+	sendCue(targets: CueTarget, text: string): void;
+	/** 全端末の録画を、まとめて始める・止める（ホストが録画を許可しているときだけ） */
+	recordAll(on: boolean): void;
 }

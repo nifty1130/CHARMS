@@ -20,6 +20,7 @@ import {
 	type ByeReason,
 	type CameraCommand,
 	type ClientMessage,
+	type CueTarget,
 	type AudioMode,
 	type HostMessage,
 	type Layout,
@@ -53,6 +54,16 @@ export interface NodeStatus {
 	zoom?: ZoomInfo | null;
 	torch?: boolean | null;
 	net?: NetInfo | null;
+	talking?: boolean;
+	listening?: boolean;
+}
+
+/** スイッチャーやホストから届いた指示 */
+export interface Cue {
+	/** 送った人（「スイッチャー 1」「ホスト」など） */
+	from: string;
+	text: string;
+	at: number;
 }
 
 /**
@@ -144,6 +155,8 @@ export class ClientSession implements SwitcherApi {
 	room = $state<string | null>(null);
 	/** 合言葉でつなぐ手続きの進み具合 */
 	joinState = $state<JoinState>('idle');
+	/** いま表示している指示（なければ null） */
+	cue = $state.raw<Cue | null>(null);
 	/** 映像接続ごとの通信の状態（2秒ごとに更新） */
 	linkStats = $state.raw<LinkStats[]>([]);
 
@@ -301,6 +314,19 @@ export class ClientSession implements SwitcherApi {
 		this.#send({ type: 'monitor_control', targetId, command });
 	}
 
+	sendCue(targets: CueTarget, text: string): void {
+		this.#send({ type: 'cue', targets, text });
+	}
+
+	recordAll(on: boolean): void {
+		this.#send({ type: 'record_all', on });
+	}
+
+	/** 表示している指示を消す */
+	dismissCue(): void {
+		this.cue = null;
+	}
+
 	/** 自分の状態（映像を出せるか、録画中か など）をホストに知らせる */
 	setStatus(status: NodeStatus): void {
 		this.#status = { ...this.#status, ...status };
@@ -424,6 +450,16 @@ export class ClientSession implements SwitcherApi {
 
 			case 'monitor_control':
 				this.onMonitorCommand?.(message.command);
+				break;
+
+			case 'cue':
+				if (typeof message.text === 'string' && message.text) {
+					this.cue = {
+						from: typeof message.from === 'string' ? message.from : '',
+						text: message.text,
+						at: Date.now()
+					};
+				}
 				break;
 		}
 	}

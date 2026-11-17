@@ -107,8 +107,13 @@
 	});
 
 	// スイッチャーからの遠隔操作を受ける
+	/** 録画の操作（スイッチャーからの一斉録画で使う） */
+	let recorder: RecordControl | undefined = $state();
+
 	session.onMonitorCommand = (command) => {
 		if (command.action === 'sound') soundOn = command.on;
+		else if (command.on) recorder?.remoteStart();
+		else recorder?.remoteStop();
 	};
 
 	// つながり直したら、つなぎ直しの画面を閉じる
@@ -272,8 +277,9 @@
 				</button>
 			</div>
 
-			{#if menuOpen}
-				<div class="mt-3 space-y-3 border border-zinc-700 bg-zinc-950/95 p-4">
+			<!-- 録画の操作は、メニューを閉じていても置いておく（遠隔操作で録画を始められるように） -->
+			{#if menuOpen || session.snapshot.settings.allowRecording}
+				<div hidden={!menuOpen} class="mt-3 space-y-3 border border-zinc-700 bg-zinc-950/95 p-4">
 					<NameEditor
 						name={session.name}
 						label="このモニターの名前"
@@ -281,6 +287,7 @@
 					/>
 					{#if session.snapshot.settings.allowRecording}
 						<RecordControl
+							bind:this={recorder}
 							getStream={startMix}
 							label={session.name}
 							description="このモニターに映した映像を、切り替えも含めてそのまま録画します"

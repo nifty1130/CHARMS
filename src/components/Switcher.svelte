@@ -177,6 +177,28 @@
 		}, 120);
 	}
 
+	const CUE_PRESETS = ['寄って', '引いて', 'そのまま', '次いくよ', 'ピントを確認', '音を確認'];
+
+	/** 指示の送り先（'all' か、端末の ID） */
+	let cueTarget = $state('all');
+	let cueDraft = $state('');
+	let cueSent = $state<string | null>(null);
+
+	// 送り先に選んでいた端末がいなくなったら、「全員」に戻す
+	$effect(() => {
+		if (cueTarget !== 'all' && !sources.some((source) => source.id === cueTarget)) cueTarget = 'all';
+	});
+
+	function sendCue(text: string) {
+		const cue = text.trim();
+		if (!cue || sources.length === 0) return;
+		api.sendCue(cueTarget === 'all' ? 'all' : [cueTarget], cue);
+		cueSent = `${cueTarget === 'all' ? '全員' : nameOf(cueTarget)}に「${cue}」と送りました`;
+		cueDraft = '';
+	}
+
+	const recordingCount = $derived(api.snapshot.nodes.filter((node) => node.recording).length);
+
 	function kindLabel(source: NodeInfo): string {
 		if (source.role === 'admin') return 'テロップ';
 		return source.sourceKind === 'screen' ? '画面共有' : 'カメラ';
@@ -603,4 +625,74 @@
 			{/if}
 		</div>
 	</section>
+
+	<!-- カメラ担当への指示 -->
+	<section class="panel" aria-label="指示を送る">
+		<div class="panel-head">
+			<h2 class="panel-title">④ カメラ担当に指示を送る</h2>
+			<span class="hint">相手の画面に大きく表示されます</span>
+		</div>
+		<div class="space-y-3 p-3">
+			<label class="flex flex-wrap items-center gap-2 text-sm text-zinc-300">
+				送り先
+				<select class="field w-auto min-w-48" bind:value={cueTarget} disabled={sources.length === 0}>
+					<option value="all">すべてのカメラ・テロップ</option>
+					{#each sources as source (source.id)}
+						<option value={source.id}>{source.name}</option>
+					{/each}
+				</select>
+			</label>
+			<div class="flex flex-wrap gap-2" role="group" aria-label="よく使う指示">
+				{#each CUE_PRESETS as preset (preset)}
+					<button type="button" class="btn" disabled={sources.length === 0} onclick={() => sendCue(preset)}>
+						{preset}
+					</button>
+				{/each}
+			</div>
+			<form
+				class="flex flex-wrap gap-2"
+				onsubmit={(event) => {
+					event.preventDefault();
+					sendCue(cueDraft);
+				}}
+			>
+				<input
+					class="field min-w-0 flex-1"
+					bind:value={cueDraft}
+					maxlength="60"
+					placeholder="自由に書く（例: 3曲目の頭でステージ全体）"
+					aria-label="指示の内容"
+				/>
+				<button type="submit" class="btn btn-primary" disabled={!cueDraft.trim() || sources.length === 0}>
+					送る
+				</button>
+			</form>
+			{#if cueSent}
+				<p class="hint" role="status">{cueSent}</p>
+			{/if}
+		</div>
+	</section>
+
+	<!-- 録画の一斉操作（ホストが録画を許可しているときだけ） -->
+	{#if api.snapshot.settings.allowRecording}
+		<section class="panel" aria-label="録画をまとめて操作する">
+			<div class="panel-head">
+				<h2 class="panel-title">⑤ 録画をまとめて操作する</h2>
+				<span class="hint">{recordingCount > 0 ? `${recordingCount}台が録画中` : '録画中の端末はありません'}</span>
+			</div>
+			<div class="space-y-2 p-3">
+				<div class="flex flex-wrap gap-2">
+					<button type="button" class="btn" onclick={() => api.recordAll(true)}>
+						<span class="text-red-500" aria-hidden="true">●</span> 全端末で録画を始める
+					</button>
+					<button type="button" class="btn" disabled={recordingCount === 0} onclick={() => api.recordAll(false)}>
+						■ 全端末の録画を止める
+					</button>
+				</div>
+				<p class="hint">
+					映像を出しているカメラ・テロップと、すべてのモニターで録画を始めます。ここから始めた録画は、止めたときに、それぞれの端末にファイルがダウンロードされます。長時間の録画は、各端末で「録画を始める」を押して保存先を選ぶ方法が安全です。
+				</p>
+			</div>
+		</section>
+	{/if}
 </div>
