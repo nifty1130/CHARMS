@@ -15,10 +15,7 @@ import { build, files, prerendered, version } from '$service-worker';
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
 const CACHE = `charms-${version}`;
-// _headers は配信元（Cloudflare）向けの設定ファイルで、ブラウザには配信されない。
-// 保存の対象に入れると取得に失敗し、オフライン用の保存がすべて取り消されてしまう。
-const STATIC_FILES = files.filter((file) => !file.endsWith('/_headers'));
-const ASSETS = [...build, ...STATIC_FILES, ...prerendered];
+const ASSETS = [...build, ...files, ...prerendered];
 
 sw.addEventListener('install', (event) => {
 	event.waitUntil(
