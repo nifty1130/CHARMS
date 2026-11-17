@@ -194,8 +194,8 @@ TURN の鍵がなくてもアプリは動きます（STUN までを使います�
 | 2025年5月 | [FestRTC](https://github.com/nifty1130/FestRTC) | WebRTC の実験。接続情報（SDP）を手で貼り付けてつなぐ |
 | 2025年5月 | [Synva-Cast](https://github.com/nifty1130/Synva-Cast) | 文化祭で初めて実運用した版。接続情報をファイルで受け渡し、Controller が映像を中継 |
 | 2025年11月 | [WebRTC-QR](https://github.com/nifty1130/WebRTC-QR) | QR コードでの接続の検討用（中身は説明のみ） |
-| 2025年11月 | [CHARMS](https://github.com/nifty1130/CHARMS) | QR コードでの接続と、端末同士が映像を直接送り合う方式に作り直した版。要件の出どころ |
-| 2026年6月 | **CHARM Point**（このリポジトリ。開発中の名前は CHARMS ExEx） | TypeScript で全面的に作り直した現行版。対称な QR 接続、合言葉・招待リンク、自動つなぎ直し、予告切替、録画、オフライン対応、STUN / TURN |
+| 2025年11月 | [CHARMS（旧版）](https://github.com/nifty1130/CHARMS-legacy) | QR コードでの接続と、端末同士が映像を直接送り合う方式に作り直した版。要件の出どころ |
+| 2026年6月 | **CHARM Point**（このリポジトリ [CHARMS](https://github.com/nifty1130/CHARMS)。開発中のコードネームは CHARMS ExEx） | TypeScript で全面的に作り直した現行版。対称な QR 接続、合言葉・招待リンク、自動つなぎ直し、予告切替、録画、オフライン対応、STUN / TURN |
 
 ## ライセンス
 

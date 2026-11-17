@@ -1,6 +1,6 @@
 # CHARM Point 仕様書 v2.5
 
-この文書は、いま実装されている動作を説明します。CHARM Point は、CHARMS（Collaborative High-quality Accessible Recording and Management System。5つの役割 Camera / Host / Admin / contRoller / Monitor の頭文字でもある）を使うためのアプリの名前です。開発中は CHARMS ExEx と呼んでいました。
+この文書は、いま実装されている動作を説明します。CHARM Point は、CHARMS（Collaborative High-quality Accessible Recording and Management System。5つの役割 Camera / Host / Admin / contRoller / Monitor の頭文字でもある）を使うためのアプリの名前です。リポジトリの名前はシステムの名前の CHARMS で、CHARMS ExEx は開発中のコードネームです。
 
 v2.1 での変更: 名前を CHARM Point に変更。配信元を Cloudflare Workers に変更。インターネットにつながるときは STUN / TURN を使うようにした（4.7、6.3、10、11）。
 
@@ -12,7 +12,7 @@ v2.3 での変更: 音声の機能を追加（6.5）。マイクの選択・音�
 
 v2.2 での変更: 合言葉・招待リンクでつなげるようにした（4.8）。接続が切れた端末やホストが、自動で元の状態に戻るようにした（5、12）。配信ソフト用の出力リンクを追加（4.8）。
 
-もとになった要件は [CHARMS 仕様書 v1.1](https://github.com/nifty1130/CHARMS) で、そこからの変更点は[最後の章](#13-charms-仕様書-v11-からの変更点)にまとめています。
+もとになった要件は [CHARMS 仕様書 v1.1](https://github.com/nifty1130/CHARMS-legacy) で、そこからの変更点は[最後の章](#13-charms-仕様書-v11-からの変更点)にまとめています。
 
 ## 1. 概要
 
