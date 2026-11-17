@@ -1,20 +1,23 @@
 <script lang="ts">
+	import LinkStatsTable from '../../components/LinkStatsTable.svelte';
 	import NameEditor from '../../components/NameEditor.svelte';
 	import NodeShell from '../../components/NodeShell.svelte';
 	import RecordControl from '../../components/RecordControl.svelte';
 	import VideoView from '../../components/VideoView.svelte';
 	import { ClientSession } from '$lib/charms/client.svelte';
+	import type { Layout } from '$lib/charms/protocol';
 	import { ProgramMixer } from '$lib/charms/recorder';
+	import { secondaryOf } from '$lib/charms/routing';
 	import { roleOf } from '$lib/roles';
 	import { onMount, untrack } from 'svelte';
 
 	const session = new ClientSession('monitor');
 	const role = roleOf('monitor');
 
-	/** ホストから指示された「いま映すべき映像」 */
-	const programId = $derived(
-		session.snapshot.routes.find((route) => route.monitorId === session.id)?.program ?? null
-	);
+	/** ホストから指示された、このモニターの映し方 */
+	const route = $derived(session.snapshot.routes.find((r) => r.monitorId === session.id));
+	/** 「いま映すべき映像」 */
+	const programId = $derived(route?.program ?? null);
 	const sourceIds = $derived(Object.keys(session.streams));
 
 	/** 実際に画面に出している映像 */
@@ -23,6 +26,17 @@
 	const playing = new WeakSet<MediaStream>();
 	/** playing が変わったことを画面に伝えるためのカウンター */
 	let playingVersion = $state(0);
+
+	/** 重ねて（並べて）出している、もう1つの映像。絵が出始めてから出す */
+	const subId = $derived.by(() => {
+		void playingVersion;
+		const wanted = secondaryOf(route);
+		if (!wanted || wanted === shownId) return null;
+		const stream = session.streams[wanted];
+		return stream && playing.has(stream) ? wanted : null;
+	});
+	/** 実際の画面の作り方（重ねる映像がまだ出せないときは、1画面にしておく） */
+	const view = $derived<Layout>(subId ? (route?.layout ?? 'single') : 'single');
 
 	let videos = $state<Record<string, HTMLVideoElement>>({});
 	let soundOn = $state(false);
@@ -60,7 +74,31 @@
 	$effect(() => {
 		const id = shownId;
 		mixer?.setProgram(id ? (videos[id] ?? null) : null, id ? (session.streams[id] ?? null) : null);
+		mixer?.setSecondary(subId ? (videos[subId] ?? null) : null, view);
 	});
+
+	/** 映像ごとの、画面の中での置き方 */
+	function placement(id: string): { class: string; fit: 'contain' | 'cover' } {
+		if (id === shownId) {
+			return {
+				class: view === 'split' ? 'inset-y-0 left-0 h-full w-1/2 opacity-100' : 'inset-0 h-full w-full opacity-100',
+				fit: 'contain'
+			};
+		}
+		if (id === subId) {
+			if (view === 'pip') {
+				// ワイプ: 右下に小さく、白い枠を付けて出す
+				return {
+					class: 'right-[3%] bottom-[3%] z-[1] aspect-video w-[28%] border-2 border-white/80 opacity-100 shadow-lg',
+					fit: 'cover'
+				};
+			}
+			if (view === 'split') return { class: 'inset-y-0 right-0 h-full w-1/2 opacity-100', fit: 'contain' };
+			// テロップ重ね: 黒い部分を透かして、明るい文字だけを重ねる
+			return { class: 'inset-0 z-[1] h-full w-full opacity-100 mix-blend-screen', fit: 'contain' };
+		}
+		return { class: 'inset-0 h-full w-full opacity-0', fit: 'contain' };
+	}
 
 	// 音を出しているかどうかを、ホストとスイッチャーに知らせる
 	$effect(() => {
@@ -123,6 +161,7 @@
 		mixer = new ProgramMixer();
 		const id = shownId;
 		mixer.setProgram(id ? (videos[id] ?? null) : null, id ? (session.streams[id] ?? null) : null);
+		mixer.setSecondary(subId ? (videos[subId] ?? null) : null, view);
 		return mixer.stream;
 	}
 
@@ -146,12 +185,14 @@
 		<!-- 受け取っている映像を重ねて置き、いま映すものだけを見せる。
 		     予告の映像も裏で再生しておくので、切り替えが一瞬で済む -->
 		{#each sourceIds as id (id)}
+			{@const place = placement(id)}
 			<VideoView
 				stream={session.streams[id]}
 				muted={!(soundOn && id === shownId)}
 				bind:element={videos[id]}
 				onPlaying={() => markPlaying(id)}
-				class="absolute inset-0 h-full w-full {id === shownId ? 'opacity-100' : 'opacity-0'}"
+				fit={place.fit}
+				class="absolute {place.class}"
 			/>
 		{/each}
 
@@ -207,7 +248,7 @@
 				<div class="mr-auto min-w-0">
 					<div class="truncate text-base font-semibold text-zinc-100">{session.name}</div>
 					<div class="text-sm text-zinc-400">
-						{shownId ? `「${nameOf(shownId)}」を表示中` : '表示なし'}
+						{shownId ? `「${nameOf(shownId)}」を表示中` : '表示なし'}{subId ? `（＋「${nameOf(subId)}」）` : ''}
 					</div>
 				</div>
 				<button
@@ -247,6 +288,12 @@
 							onStopped={stopMix}
 						/>
 					{/if}
+					<details>
+						<summary class="cursor-pointer text-sm text-zinc-300 hover:text-zinc-100">通信の状態</summary>
+						<div class="mt-2 border border-zinc-800">
+							<LinkStatsTable links={session.linkStats} {nameOf} />
+						</div>
+					</details>
 					<p class="hint">
 						音は最初は消してあります。このモニターから音を出したいときだけ「音を出す」を押してください。
 					</p>

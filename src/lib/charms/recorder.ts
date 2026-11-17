@@ -7,6 +7,8 @@
  * 録画はホストが「録画を許可」にしているときだけ、画面から使えるようにする。
  */
 
+import type { Layout } from './protocol';
+
 /** 保存先を選べるブラウザ（PC の Chrome / Edge）かどうか */
 function canPickFile(): boolean {
 	return typeof window !== 'undefined' && 'showSaveFilePicker' in window;
@@ -197,6 +199,8 @@ export class ProgramMixer {
 	readonly #destination: MediaStreamAudioDestinationNode;
 	readonly #timer: ReturnType<typeof setInterval>;
 	#video: HTMLVideoElement | null = null;
+	#secondary: HTMLVideoElement | null = null;
+	#layout: Layout = 'single';
 	#source: MediaStreamAudioSourceNode | null = null;
 	#sourceStream: MediaStream | null = null;
 
@@ -229,6 +233,17 @@ export class ProgramMixer {
 		}
 	}
 
+	/**
+	 * 重ねて（並べて）出している、もう1つの映像を指定する
+	 *
+	 * @param video もう1つの映像（出していないときは null）
+	 * @param layout 画面の作り方
+	 */
+	setSecondary(video: HTMLVideoElement | null, layout: Layout): void {
+		this.#secondary = video;
+		this.#layout = video ? layout : 'single';
+	}
+
 	destroy(): void {
 		clearInterval(this.#timer);
 		this.#source?.disconnect();
@@ -236,18 +251,78 @@ export class ProgramMixer {
 		void this.#audio.close().catch(() => {});
 	}
 
-	/** 映像の縦横比を保ったまま、黒い余白を付けて描く */
+	/** モニターの画面と同じ作り方で、1コマ描く */
 	#draw(): void {
 		const { width, height } = this.#canvas;
 		const context = this.#context;
+		context.globalCompositeOperation = 'source-over';
 		context.fillStyle = '#000';
 		context.fillRect(0, 0, width, height);
 
-		const video = this.#video;
-		if (!video || video.videoWidth === 0 || video.videoHeight === 0) return;
+		const main = this.#video;
+		const sub = this.#secondary;
+
+		switch (this.#layout) {
+			case 'split':
+				this.#contain(main, 0, 0, width / 2, height);
+				this.#contain(sub, width / 2, 0, width / 2, height);
+				break;
+
+			case 'pip': {
+				this.#contain(main, 0, 0, width, height);
+				// 右下に、画面の幅の 28% の大きさで出す（余白は 3%）
+				const w = width * 0.28;
+				const h = (w * 9) / 16;
+				const x = width - w - width * 0.03;
+				const y = height - h - height * 0.03;
+				if (this.#cover(sub, x, y, w, h)) {
+					context.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+					context.lineWidth = 3;
+					context.strokeRect(x, y, w, h);
+				}
+				break;
+			}
+
+			case 'overlay':
+				this.#contain(main, 0, 0, width, height);
+				// 黒い部分を透かして、明るい文字だけを重ねる
+				context.globalCompositeOperation = 'screen';
+				this.#contain(sub, 0, 0, width, height);
+				context.globalCompositeOperation = 'source-over';
+				break;
+
+			default:
+				this.#contain(main, 0, 0, width, height);
+		}
+	}
+
+	/** 映像の縦横比を保ったまま、枠の中に全体が収まるように描く（余白は黒） */
+	#contain(video: HTMLVideoElement | null, x: number, y: number, width: number, height: number): boolean {
+		if (!video || video.videoWidth === 0 || video.videoHeight === 0) return false;
 		const scale = Math.min(width / video.videoWidth, height / video.videoHeight);
 		const w = video.videoWidth * scale;
 		const h = video.videoHeight * scale;
-		context.drawImage(video, (width - w) / 2, (height - h) / 2, w, h);
+		this.#context.drawImage(video, x + (width - w) / 2, y + (height - h) / 2, w, h);
+		return true;
+	}
+
+	/** 映像の縦横比を保ったまま、枠を埋めるように描く（はみ出す部分は切る） */
+	#cover(video: HTMLVideoElement | null, x: number, y: number, width: number, height: number): boolean {
+		if (!video || video.videoWidth === 0 || video.videoHeight === 0) return false;
+		const scale = Math.max(width / video.videoWidth, height / video.videoHeight);
+		const sw = width / scale;
+		const sh = height / scale;
+		this.#context.drawImage(
+			video,
+			(video.videoWidth - sw) / 2,
+			(video.videoHeight - sh) / 2,
+			sw,
+			sh,
+			x,
+			y,
+			width,
+			height
+		);
+		return true;
 	}
 }

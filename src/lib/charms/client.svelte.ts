@@ -22,16 +22,20 @@ import {
 	type ClientMessage,
 	type AudioMode,
 	type HostMessage,
+	type Layout,
 	type MonitorCommand,
 	type MonitorTarget,
+	type NetInfo,
 	type NodeInfo,
 	type NodeRole,
 	type QualityId,
 	type ResumeInfo,
 	type SessionSnapshot,
-	type SourceKind
+	type SourceKind,
+	type ZoomInfo
 } from './protocol';
 import { normalizeRoomCode, RoomSocket, type RoomMessage } from './room';
+import { StatsWatcher, summarizeNet, type LinkStats } from './stats';
 import type { SwitcherApi } from './switcher-api';
 
 /** ホストに知らせる、自分の端末の状態 */
@@ -45,6 +49,10 @@ export interface NodeStatus {
 	muted?: boolean;
 	audioMode?: AudioMode;
 	sound?: boolean;
+	/** null を渡すと「できない」に戻す */
+	zoom?: ZoomInfo | null;
+	torch?: boolean | null;
+	net?: NetInfo | null;
 }
 
 /**
@@ -136,6 +144,8 @@ export class ClientSession implements SwitcherApi {
 	room = $state<string | null>(null);
 	/** 合言葉でつなぐ手続きの進み具合 */
 	joinState = $state<JoinState>('idle');
+	/** 映像接続ごとの通信の状態（2秒ごとに更新） */
+	linkStats = $state.raw<LinkStats[]>([]);
 
 	/** スイッチャーから遠隔操作されたとき（カメラ・テロップ用） */
 	onCameraCommand: ((command: CameraCommand) => void) | null = null;
@@ -148,6 +158,8 @@ export class ClientSession implements SwitcherApi {
 	#resume: ResumeInfo | null = null;
 	#socket: RoomSocket | null = null;
 	#offerTimer: ReturnType<typeof setTimeout> | undefined;
+	readonly #watcher: StatsWatcher;
+	#netKey = 'null';
 
 	constructor(role: NodeRole) {
 		this.role = role;
@@ -169,6 +181,16 @@ export class ClientSession implements SwitcherApi {
 					sinkId: sinkId ?? this.id
 				});
 			}
+		});
+
+		// 通信の状態を調べ、まとめ（良好 / 不安定、中継経由か）が変わったときだけホストに知らせる
+		this.#watcher = new StatsWatcher(this.media, (links) => {
+			this.linkStats = links;
+			const net = summarizeNet(links);
+			const key = JSON.stringify(net);
+			if (key === this.#netKey) return;
+			this.#netKey = key;
+			this.setStatus({ net });
 		});
 	}
 
@@ -260,6 +282,10 @@ export class ClientSession implements SwitcherApi {
 		this.#send({ type: 'take', monitors });
 	}
 
+	setLayout(monitors: MonitorTarget, layout: Layout, sub: string | null): void {
+		this.#send({ type: 'layout', monitors, layout, sub });
+	}
+
 	rename(id: string, name: string): void {
 		if (id === this.id) {
 			saveName(this.role, name.trim());
@@ -291,6 +317,7 @@ export class ClientSession implements SwitcherApi {
 	/** 終了する */
 	destroy(): void {
 		this.#destroyed = true;
+		this.#watcher.destroy();
 		this.#closeSocket();
 		this.pairing.close();
 		this.media.closeAll();
