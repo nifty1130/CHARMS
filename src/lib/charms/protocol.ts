@@ -70,6 +70,12 @@ export interface SessionSnapshot {
 	nodes: NodeInfo[];
 	routes: Route[];
 	settings: SessionSettings;
+	/**
+	 * ホストが開いているルームの合言葉（開いていなければ null）
+	 *
+	 * 端末はこれを覚えておき、ホストとの接続が切れたときに、ルーム経由で自動でつなぎ直す。
+	 */
+	room?: string | null;
 }
 
 /** スイッチャーからカメラへの遠隔操作 */
@@ -78,9 +84,23 @@ export type CameraCommand = { action: 'quality'; quality: QualityId } | { action
 /** 切り替えの対象にするモニター。`'all'` は全モニター */
 export type MonitorTarget = string[] | 'all';
 
+/**
+ * つなぎ直すときに「前と同じ端末です」と名乗るための情報
+ *
+ * `token` は、最初につながったときにホストから渡される合図。
+ * 合っていれば、ホストは同じ ID と名前を割り当て直し、映していた映像も元に戻す。
+ */
+export interface ResumeInfo {
+	id: string;
+	token: string;
+}
+
+/** ホストが端末との接続を終える理由（`replaced`: 同じ端末が別の画面でつなぎ直した / `removed`: ホストが切断した） */
+export type ByeReason = 'replaced' | 'removed';
+
 /** 端末 → ホスト */
 export type ClientMessage =
-	| { type: 'register'; role: NodeRole; name?: string }
+	| { type: 'register'; role: NodeRole; name?: string; resume?: ResumeInfo }
 	| { type: 'rename'; id: string; name: string }
 	| {
 			type: 'status';
@@ -98,7 +118,8 @@ export type ClientMessage =
 
 /** ホスト → 端末 */
 export type HostMessage =
-	| { type: 'registered'; id: string; name: string }
+	| { type: 'registered'; id: string; name: string; token: string }
+	| { type: 'bye'; reason: ByeReason }
 	| { type: 'snapshot'; snapshot: SessionSnapshot }
 	| { type: 'make_offer'; targetId: string; profile: LinkProfile }
 	| { type: 'drop_link'; peerId: string }

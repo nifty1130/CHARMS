@@ -28,6 +28,8 @@ const TURN_URLS = [
 export interface IceEnv {
 	TURN_KEY_ID?: string;
 	TURN_KEY_API_TOKEN?: string;
+	/** 'true' にすると、空の一覧を返す（自動テスト用。外部のサーバーに頼らずに動かす） */
+	ICE_DISABLED?: string;
 }
 
 interface IceServer {
@@ -76,6 +78,9 @@ async function issueTurnServer(env: IceEnv, fetcher: typeof fetch): Promise<IceS
 
 /** STUN / TURN サーバーの一覧を組み立てる */
 export async function buildIceResponse(env: IceEnv, fetcher: typeof fetch = fetch): Promise<IceResponse> {
+	if (env.ICE_DISABLED === 'true') {
+		return { iceServers: [], ttl: CREDENTIAL_TTL_SECONDS, relay: false };
+	}
 	const turn = await issueTurnServer(env, fetcher);
 	return {
 		iceServers: turn ? [STUN_SERVER, turn] : [STUN_SERVER],

@@ -18,6 +18,10 @@
 	"workers_dev": false,
 	"preview_urls": false,
 
+	// 合言葉ごとのルーム（招待リンクでつなぐための受け渡し場所）
+	"durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }] },
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+
 	"observability": { "enabled": true }
 
 	// TURN（中継）の鍵は、ここには書かずに「シークレット」として登録する:

@@ -19,7 +19,7 @@ export default defineConfig({
 	retries: process.env.CI ? 1 : 0,
 	reporter: process.env.CI ? [['github'], ['list']] : 'list',
 	use: {
-		baseURL: `http://localhost:${PORT}`,
+		baseURL: `http://127.0.0.1:${PORT}`,
 		locale: 'ja-JP',
 		permissions: ['camera', 'microphone'],
 		trace: 'retain-on-failure'
@@ -49,8 +49,10 @@ export default defineConfig({
 		}
 	],
 	webServer: {
-		command: `npm run build && npm run preview -- --port ${PORT} --strictPort`,
-		url: `http://localhost:${PORT}`,
+		// Cloudflare と同じ構成（アプリ + Worker）を手元で動かす。合言葉でつなぐ機能も試せる。
+		// STUN / TURN は使わない設定にして、外部のサーバーに頼らずに動かす
+		command: `npm run build && npx wrangler dev --port ${PORT} --ip 127.0.0.1 --var ICE_DISABLED:true`,
+		url: `http://127.0.0.1:${PORT}`,
 		reuseExistingServer: !process.env.CI,
 		timeout: 180_000
 	}

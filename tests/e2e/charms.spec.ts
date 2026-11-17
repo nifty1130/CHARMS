@@ -202,7 +202,7 @@ test('スイッチャーからカメラの画質と名前を遠隔で変えら�
 	await expect(host.getByText('体育館ステージ').first()).toBeVisible();
 });
 
-test('ホストが閉じても、モニターは映像を出し続け、つなぎ直しを案内する', async ({ context }) => {
+test('ホストが閉じても、モニターは映像を出し続け、ホストを開き直すと自動で元に戻る', async ({ context }) => {
 	const host = await openHost(context);
 	const camera = await join(context, '/camera/', 'カメラ 1');
 	const monitor = await join(context, '/monitor/', 'モニター 1');
@@ -213,15 +213,19 @@ test('ホストが閉じても、モニターは映像を出し続け、つな�
 	host.on('dialog', (dialog) => void dialog.accept());
 	await host.close({ runBeforeUnload: false });
 
-	await expect(monitor.getByText(/ホストとの接続が切れました/)).toBeVisible();
+	await expect(monitor.getByText(/ホストとの接続が切れました。自動でつなぎ直しています/)).toBeVisible();
 	await expectMonitorShowsVideo(monitor);
+	// カメラは、撮影の画面を出したまま待つ
 	await expect(camera.getByText('ホストとの接続が切れました。')).toBeVisible();
+	await expect(camera.getByText('カメラで撮影中')).toBeVisible();
 
-	// 新しいホストを開けば、つなぎ直せる
-	await openHost(context);
-	await monitor.getByRole('button', { name: 'ホストとつなぎ直す' }).click();
-	await monitor.getByRole('button', { name: 'この端末のホストにつなぐ' }).click();
-	await expect(monitor.getByText('映像を待っています')).toBeVisible();
+	// ホストを開き直すと、何も操作しなくても、同じ名前・同じ映像の割り当てに戻る
+	const reopened = await openHost(context);
+	await expect(reopened.getByText('2台とつながっています')).toBeVisible({ timeout: 30_000 });
+	await expect(reopened.getByText('「カメラ 1」を表示中')).toBeVisible();
+	await expect(monitor.getByText(/ホストとの接続が切れました/)).toBeHidden();
+	await expectMonitorShowsVideo(monitor);
+	await expect(camera.getByRole('status').filter({ hasText: 'カメラ 1' })).toBeVisible();
 });
 
 test('ホストの画面から端末を切断できる（確認つき）', async ({ context }) => {
@@ -236,7 +240,10 @@ test('ホストの画面から端末を切断できる（確認つき）', async
 	host.once('dialog', (dialog) => void dialog.accept());
 	await host.getByRole('button', { name: '切断' }).click();
 	await expect(host.getByText('0台とつながっています')).toBeVisible();
-	await expect(monitor.getByText(/ホストとの接続が切れました/)).toBeVisible();
+	// 切断された端末は、自動ではつなぎ直さない
+	await expect(monitor.getByText('ホストから切断されました。')).toBeVisible();
+	await monitor.waitForTimeout(3000);
+	await expect(host.getByText('0台とつながっています')).toBeVisible();
 });
 
 test('一度開いたあとは、インターネットなしでも全ページを開ける', async ({ context, page }) => {

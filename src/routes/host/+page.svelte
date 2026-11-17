@@ -1,6 +1,7 @@
 <script lang="ts">
 	import AppHeader from '../../components/AppHeader.svelte';
 	import ConnectPanel from '../../components/ConnectPanel.svelte';
+	import InvitePanel from '../../components/InvitePanel.svelte';
 	import Switcher from '../../components/Switcher.svelte';
 	import { HostSession } from '$lib/charms/host.svelte';
 	import { ROLE_DEFAULTS, type NodeInfo, type NodeRole } from '$lib/charms/protocol';
@@ -8,7 +9,8 @@
 	import { roleOf } from '$lib/roles';
 	import { onDestroy, onMount } from 'svelte';
 
-	const host = new HostSession();
+	// 状況を端末に保存しておき、読み込み直しても続きから再開できるようにする
+	const host = new HostSession({ persist: true });
 	const role = roleOf('host');
 
 	const nodes = $derived(host.snapshot.nodes);
@@ -44,6 +46,9 @@
 	});
 
 	onMount(() => {
+		// インターネットにつながっていれば、合言葉でもつなげるようにする
+		if (host.roomPreferred) host.openRoom();
+
 		const releaseWake = keepScreenAwake();
 		// 端末がつながっている間は、うっかり閉じないよう確認を出す
 		const releaseGuard = confirmBeforeLeaving(() => host.snapshot.nodes.length > 0);
@@ -69,7 +74,7 @@
 	/** 本番中に誤って押しても切れないよう、確認してから切断する */
 	function disconnect(node: NodeInfo) {
 		if (confirm(`「${node.name}」を切断しますか？
-もう一度つなぐには、QR コードの読み取りからやり直しになります。`)) {
+もう一度つなぐには、合言葉の入力か QR コードの読み取りからやり直しになります。`)) {
 			host.disconnect(node.id);
 		}
 	}
@@ -108,7 +113,7 @@
 		class="mt-4 border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm leading-relaxed text-amber-100"
 	>
 		<strong class="font-semibold">このページは閉じないでください。</strong
-		>閉じたり再読み込みしたりすると、全端末がつなぎ直しになります（モニターの映像はそのまま出続けます）。
+		>閉じたり再読み込みしたりすると、全端末がつなぎ直しになります（モニターの映像はそのまま出続けます。合言葉が使えるときは、開き直すと端末が自動で戻ってきます）。
 	</p>
 
 	<div class="mt-6 space-y-6">
@@ -124,13 +129,23 @@
 					{adding ? '追加を終わる' : '＋ 端末を追加する'}
 				</button>
 			</div>
-			{#if adding && host.invite}
-				<p class="hint mb-3">
-					つなぎたい端末で役割を選ぶと、同じような画面が出ます。お互いの QR
-					コードを読み取り合ってください。1台つながると、続けて次の端末をつなげます。
-				</p>
-				<ConnectPanel pairing={host.invite} side="host" onRestart={() => host.resetInvite()} />
-			{:else if !adding}
+			{#if adding}
+				<div class="space-y-4">
+					<InvitePanel {host} />
+					{#if host.invite}
+						<div>
+							<h2 class="mb-1 text-base font-semibold">
+								QR コードでつなぐ（インターネットがなくても使えます）
+							</h2>
+							<p class="hint mb-3">
+								つなぎたい端末で役割を選ぶと、同じような画面が出ます。お互いの QR
+								コードを読み取り合ってください。1台つながると、続けて次の端末をつなげます。
+							</p>
+							<ConnectPanel pairing={host.invite} side="host" onRestart={() => host.resetInvite()} />
+						</div>
+					{/if}
+				</div>
+			{:else}
 				<p class="hint">端末を増やすときは「端末を追加する」を押してください。</p>
 			{/if}
 		</section>
@@ -141,6 +156,39 @@
 				<h2 class="panel-title">つながっている端末</h2>
 				<span class="hint">{nodes.length}台</span>
 			</div>
+			{#if host.absent.length > 0}
+				<div class="border-b border-zinc-800 bg-amber-500/5 p-3" aria-label="戻ってくるのを待っている端末">
+					<div class="flex flex-wrap items-center justify-between gap-2">
+						<p class="min-w-0 flex-1 text-sm text-amber-100">
+							<strong class="font-semibold">
+								{host.restored ? '前回の続きから再開しました。' : ''}接続が切れた端末が戻ってくるのを待っています（{host
+									.absent.length}台）。
+							</strong>
+							戻ってきたら、同じ名前・同じ映像の割り当てに戻します。合言葉でつないだ端末は自動で戻ります。
+						</p>
+						<button type="button" class="btn btn-quiet text-xs" onclick={() => host.forget()}>
+							待つのをやめる
+						</button>
+					</div>
+					<ul class="mt-2 flex flex-wrap gap-2">
+						{#each host.absent as node (node.id)}
+							<li
+								class="flex items-center gap-1 border border-zinc-700 bg-zinc-950 py-0.5 pr-0.5 pl-2 text-xs text-zinc-300"
+							>
+								{node.name}
+								<button
+									type="button"
+									class="px-1.5 py-0.5 text-zinc-500 hover:text-zinc-100"
+									aria-label="{node.name} を待つのをやめる"
+									onclick={() => host.forget(node.id)}
+								>
+									×
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</div>
+			{/if}
 			{#if nodes.length === 0}
 				<p class="hint p-6 text-center">まだどの端末もつながっていません。</p>
 			{:else}
