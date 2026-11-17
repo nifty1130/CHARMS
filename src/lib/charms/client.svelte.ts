@@ -20,7 +20,9 @@ import {
 	type ByeReason,
 	type CameraCommand,
 	type ClientMessage,
+	type AudioMode,
 	type HostMessage,
+	type MonitorCommand,
 	type MonitorTarget,
 	type NodeInfo,
 	type NodeRole,
@@ -39,6 +41,10 @@ export interface NodeStatus {
 	quality?: QualityId;
 	sourceKind?: SourceKind;
 	canFlip?: boolean;
+	hasAudio?: boolean;
+	muted?: boolean;
+	audioMode?: AudioMode;
+	sound?: boolean;
 }
 
 /**
@@ -133,6 +139,8 @@ export class ClientSession implements SwitcherApi {
 
 	/** スイッチャーから遠隔操作されたとき（カメラ・テロップ用） */
 	onCameraCommand: ((command: CameraCommand) => void) | null = null;
+	/** スイッチャーから遠隔操作されたとき（モニター用） */
+	onMonitorCommand: ((command: MonitorCommand) => void) | null = null;
 
 	readonly media: MediaLinks;
 	#status: NodeStatus = {};
@@ -263,6 +271,10 @@ export class ClientSession implements SwitcherApi {
 		this.#send({ type: 'camera_control', targetId, command });
 	}
 
+	monitorControl(targetId: string, command: MonitorCommand): void {
+		this.#send({ type: 'monitor_control', targetId, command });
+	}
+
 	/** 自分の状態（映像を出せるか、録画中か など）をホストに知らせる */
 	setStatus(status: NodeStatus): void {
 		this.#status = { ...this.#status, ...status };
@@ -381,6 +393,10 @@ export class ClientSession implements SwitcherApi {
 
 			case 'camera_control':
 				this.onCameraCommand?.(message.command);
+				break;
+
+			case 'monitor_control':
+				this.onMonitorCommand?.(message.command);
 				break;
 		}
 	}

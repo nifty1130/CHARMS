@@ -86,7 +86,7 @@ test('予告してから切り替える（2段階切替）と、全モニター�
 
 	// モニターを1台だけ選んで切り替える
 	await host.getByRole('button', { name: '押したらすぐ切り替える' }).click();
-	await host.getByRole('button', { name: /^モニター 2/ }).click();
+	await host.getByRole('button', { name: /^モニター 2 本番/ }).click();
 	await host.getByRole('button', { name: 'カメラ 1 を映す' }).click();
 	await expect(monitor2.getByText('「カメラ 1」を表示中')).toBeAttached();
 	await expect(monitor1.getByText('「カメラ 2」を表示中')).toBeAttached();

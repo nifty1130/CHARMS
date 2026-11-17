@@ -21,6 +21,14 @@ export type QualityId = 'low' | 'medium' | 'high';
 export type SourceKind = 'webcam' | 'screen' | 'text';
 
 /**
+ * 音声の送り方
+ *
+ * - `voice`: 会話向け（雑音を抑える）
+ * - `music`: 音楽向け（加工をせず、高音質・ステレオ）
+ */
+export type AudioMode = 'voice' | 'music';
+
+/**
  * 映像の送り方
  *
  * - `thumbnail`: ホストやスイッチャーの画面に並べる小さな確認用映像（低画質・音声なし）
@@ -45,6 +53,14 @@ export interface NodeInfo {
 	sourceKind?: SourceKind;
 	/** 別のカメラに切り替えられるか（カメラが2つ以上ある端末） */
 	canFlip?: boolean;
+	/** 音声を送っているか（マイクのない端末やテロップでは false） */
+	hasAudio?: boolean;
+	/** マイクを消音しているか（カメラのみ） */
+	muted?: boolean;
+	/** 音声の送り方（カメラのみ） */
+	audioMode?: AudioMode;
+	/** 音を出しているか（モニターのみ） */
+	sound?: boolean;
 }
 
 /**
@@ -79,7 +95,14 @@ export interface SessionSnapshot {
 }
 
 /** スイッチャーからカメラへの遠隔操作 */
-export type CameraCommand = { action: 'quality'; quality: QualityId } | { action: 'flip' };
+export type CameraCommand =
+	| { action: 'quality'; quality: QualityId }
+	| { action: 'flip' }
+	| { action: 'mute'; muted: boolean }
+	| { action: 'audio_mode'; mode: AudioMode };
+
+/** スイッチャーからモニターへの遠隔操作 */
+export type MonitorCommand = { action: 'sound'; on: boolean };
 
 /** 切り替えの対象にするモニター。`'all'` は全モニター */
 export type MonitorTarget = string[] | 'all';
@@ -109,12 +132,17 @@ export type ClientMessage =
 			quality?: QualityId;
 			sourceKind?: SourceKind;
 			canFlip?: boolean;
+			hasAudio?: boolean;
+			muted?: boolean;
+			audioMode?: AudioMode;
+			sound?: boolean;
 	  }
 	| { type: 'route'; monitors: MonitorTarget; stage: 'program' | 'preview'; sourceId: string | null }
 	| { type: 'take'; monitors: MonitorTarget }
 	| { type: 'signal'; toId: string; description: RTCSessionDescriptionInit }
 	| { type: 'link_failed'; sourceId: string; sinkId: string }
-	| { type: 'camera_control'; targetId: string; command: CameraCommand };
+	| { type: 'camera_control'; targetId: string; command: CameraCommand }
+	| { type: 'monitor_control'; targetId: string; command: MonitorCommand };
 
 /** ホスト → 端末 */
 export type HostMessage =
@@ -124,7 +152,8 @@ export type HostMessage =
 	| { type: 'make_offer'; targetId: string; profile: LinkProfile }
 	| { type: 'drop_link'; peerId: string }
 	| { type: 'signal'; fromId: string; description: RTCSessionDescriptionInit }
-	| { type: 'camera_control'; command: CameraCommand };
+	| { type: 'camera_control'; command: CameraCommand }
+	| { type: 'monitor_control'; command: MonitorCommand };
 
 /** 役割ごとの ID の頭文字と、名前の初期値 */
 export const ROLE_DEFAULTS: Record<NodeRole, { prefix: string; label: string }> = {

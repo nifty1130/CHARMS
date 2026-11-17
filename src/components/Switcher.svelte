@@ -5,6 +5,7 @@
 		type NodeInfo,
 		type QualityId
 	} from '$lib/charms/protocol';
+	import { AUDIO_MODES, AUDIO_MODE_ORDER } from '$lib/charms/audio';
 	import { QUALITY_ORDER, QUALITY_PRESETS } from '$lib/charms/quality';
 	import type { SwitcherApi } from '$lib/charms/switcher-api';
 	import VideoView from './VideoView.svelte';
@@ -175,25 +176,40 @@
 			{#each monitors as monitor (monitor.id)}
 				{@const route = routes.find((r) => r.monitorId === monitor.id)}
 				{@const on = !pickAll && picked.includes(monitor.id)}
-				<button
-					type="button"
-					class="btn h-auto flex-col items-start gap-0.5 py-2 text-left {on ? 'btn-on' : ''}"
-					aria-pressed={on}
-					onclick={() => toggleMonitor(monitor.id)}
-				>
-					<span class="flex items-center gap-2 text-sm font-semibold">
-						{monitor.name}
-						{#if monitor.recording}
-							<span class="text-xs font-medium text-red-500">● 録画中</span>
-						{/if}
-					</span>
-					<span class="flex items-center gap-1.5 text-xs font-normal {on ? 'text-zinc-700' : 'text-zinc-400'}">
-						<span class="size-2 rounded-full bg-red-500"></span>本番: {nameOf(route?.program ?? null)}
-						{#if route?.preview}
-							<span class="ml-2 size-2 rounded-full bg-emerald-500"></span>予告: {nameOf(route.preview)}
-						{/if}
-					</span>
-				</button>
+				<div class="flex">
+					<button
+						type="button"
+						class="btn h-auto flex-col items-start gap-0.5 py-2 text-left {on ? 'btn-on' : ''}"
+						aria-pressed={on}
+						onclick={() => toggleMonitor(monitor.id)}
+					>
+						<span class="flex items-center gap-2 text-sm font-semibold">
+							{monitor.name}
+							{#if monitor.recording}
+								<span class="text-xs font-medium text-red-500">● 録画中</span>
+							{/if}
+						</span>
+						<span class="flex items-center gap-1.5 text-xs font-normal {on ? 'text-zinc-700' : 'text-zinc-400'}">
+							<span class="size-2 rounded-full bg-red-500"></span>本番: {nameOf(route?.program ?? null)}
+							{#if route?.preview}
+								<span class="ml-2 size-2 rounded-full bg-emerald-500"></span>予告: {nameOf(route.preview)}
+							{/if}
+						</span>
+					</button>
+					<!-- モニターの音を、手元から出す・消す -->
+					<button
+						type="button"
+						class="btn -ml-px h-auto flex-col gap-0 px-2.5 py-2 text-xs {monitor.sound
+							? 'border-emerald-500/70 text-emerald-300'
+							: 'text-zinc-400'}"
+						aria-pressed={!!monitor.sound}
+						aria-label="{monitor.name} の音を{monitor.sound ? '消す' : '出す'}"
+						onclick={() => api.monitorControl(monitor.id, { action: 'sound', on: !monitor.sound })}
+					>
+						<span>音</span>
+						<span class="font-semibold">{monitor.sound ? '出ている' : '消音'}</span>
+					</button>
+				</div>
 			{/each}
 		</div>
 	</section>
@@ -292,6 +308,9 @@
 									{#if source.recording}
 										<span class="font-medium text-red-500">● 録画中</span>
 									{/if}
+									{#if source.hasAudio && source.muted}
+										<span class="font-medium text-amber-300">マイク消音中</span>
+									{/if}
 								</div>
 							</div>
 							<button
@@ -383,6 +402,36 @@
 								{/if}
 							</div>
 						</div>
+
+						{#if editing.hasAudio}
+							<div>
+								<span class="text-sm text-zinc-300">音声（カメラ端末を遠隔で切り替えます）</span>
+								<div class="mt-1 flex flex-wrap gap-2">
+									<button
+										type="button"
+										class="btn {editing.muted ? 'btn-danger' : ''}"
+										aria-pressed={!!editing.muted}
+										onclick={() =>
+											api.cameraControl(editing.id, { action: 'mute', muted: !editing.muted })}
+									>
+										{editing.muted ? 'マイクの消音を解除する' : 'マイクを消音する'}
+									</button>
+									{#each AUDIO_MODE_ORDER as mode (mode)}
+										<button
+											type="button"
+											class="btn {(editing.audioMode ?? 'voice') === mode ? 'btn-on' : ''}"
+											aria-pressed={(editing.audioMode ?? 'voice') === mode}
+											onclick={() => api.cameraControl(editing.id, { action: 'audio_mode', mode })}
+										>
+											{AUDIO_MODES[mode].label}
+										</button>
+									{/each}
+								</div>
+								<p class="hint mt-1">
+									「音楽向け」は、演奏や歌を高音質で送ります。切り替えるとき、映像と音が一瞬途切れます。
+								</p>
+							</div>
+						{/if}
 					{/if}
 				</div>
 			</div>
