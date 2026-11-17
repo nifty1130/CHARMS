@@ -118,16 +118,15 @@ describe('通信の状態', () => {
 		...over
 	});
 
-	it('欠け・遅延・コマ数から、3段階で評価する', () => {
+	it('欠けと遅延から、3段階で評価する', () => {
 		expect(gradeLink(link({}))).toBe('good');
 		expect(gradeLink(link({ lossPercent: 1.5 }))).toBe('fair');
 		expect(gradeLink(link({ rttMs: 200 }))).toBe('fair');
-		expect(gradeLink(link({ limitation: 'bandwidth' }))).toBe('fair');
 		expect(gradeLink(link({ lossPercent: 8 }))).toBe('poor');
 		expect(gradeLink(link({ rttMs: 600 }))).toBe('poor');
-		expect(gradeLink(link({ fps: 2 }))).toBe('poor');
-		// 確認用の小さな映像（毎秒10コマ）は、正常
-		expect(gradeLink(link({ profile: 'thumbnail', fps: 10, kbps: 120 }))).toBe('good');
+		// 動きのないテロップ（コマ数が少ない）や、画質を絞っている確認用の映像は、正常
+		expect(gradeLink(link({ fps: 1 }))).toBe('good');
+		expect(gradeLink(link({ profile: 'thumbnail', fps: 10, kbps: 120, limitation: 'bandwidth' }))).toBe('good');
 		// 測り始めで値がないときは、悪いとは言わない
 		expect(gradeLink(link({ kbps: null, fps: null, rttMs: null, lossPercent: null, limitation: null }))).toBe('good');
 	});

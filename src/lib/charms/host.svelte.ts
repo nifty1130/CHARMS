@@ -27,6 +27,7 @@ import {
 	HOST_ID,
 	LAYOUTS,
 	ROLE_DEFAULTS,
+	cleanCue,
 	cleanName,
 	emptySnapshot,
 	isSourceRole,
@@ -34,6 +35,7 @@ import {
 	type ByeReason,
 	type CameraCommand,
 	type ClientMessage,
+	type CueTarget,
 	type HostMessage,
 	type Layout,
 	type MonitorCommand,
@@ -391,6 +393,30 @@ export class HostSession implements SwitcherApi {
 		entry.pairing.send({ type: 'monitor_control', command } satisfies HostMessage);
 	}
 
+	sendCue(targets: CueTarget, text: string, from = 'ホスト'): void {
+		const cue = cleanCue(text);
+		if (!cue) return;
+		for (const entry of this.#nodes.values()) {
+			if (!isSourceRole(entry.info.role)) continue;
+			if (targets !== 'all' && !(Array.isArray(targets) && targets.includes(entry.info.id))) continue;
+			entry.pairing.send({ type: 'cue', from, text: cue } satisfies HostMessage);
+		}
+	}
+
+	recordAll(on: boolean): void {
+		// 止めるのは、いつでもできる。始めるのは、録画を許可しているときだけ
+		if (on && !this.#settings.allowRecording) return;
+		for (const entry of this.#nodes.values()) {
+			const { role, live } = entry.info;
+			if (isSourceRole(role) && (live || !on)) {
+				entry.pairing.send({ type: 'camera_control', command: { action: 'record', on } } satisfies HostMessage);
+			} else if (role === 'monitor') {
+				entry.pairing.send({ type: 'monitor_control', command: { action: 'record', on } } satisfies HostMessage);
+			}
+		}
+		this.#log(on ? '全端末の録画を始めました' : '全端末の録画を止めました');
+	}
+
 	// ---- ホストだけができる操作 ----
 
 	/** 録画を許可するかどうかを切り替える */
@@ -471,6 +497,8 @@ export class HostSession implements SwitcherApi {
 				else if (typeof message.torch === 'boolean') info.torch = message.torch;
 				if (message.net === null) delete info.net;
 				else if (isNetInfo(message.net)) info.net = message.net;
+				if (typeof message.talking === 'boolean') info.talking = message.talking;
+				if (typeof message.listening === 'boolean') info.listening = message.listening;
 				entry.info = info;
 				this.#publish();
 				break;
@@ -502,6 +530,16 @@ export class HostSession implements SwitcherApi {
 				if (entry.info.role === 'controller') {
 					this.monitorControl(message.targetId, message.command);
 				}
+				break;
+
+			case 'cue':
+				if (entry.info.role === 'controller') {
+					this.sendCue(message.targets, message.text, entry.info.name);
+				}
+				break;
+
+			case 'record_all':
+				if (entry.info.role === 'controller') this.recordAll(message.on === true);
 				break;
 
 			case 'signal':

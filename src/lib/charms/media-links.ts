@@ -36,7 +36,8 @@ export interface MediaLinksOptions {
 interface Outgoing {
 	pc: RTCPeerConnection;
 	profile: LinkProfile;
-	video: RTCRtpSender;
+	/** 映像の送り手（インカムでは null） */
+	video: RTCRtpSender | null;
 	audio: RTCRtpSender | null;
 }
 
@@ -52,6 +53,8 @@ export class MediaLinks {
 	#stream: MediaStream | null = null;
 	#quality: QualityId = 'medium';
 	#audioMode: AudioMode = DEFAULT_AUDIO_MODE;
+	/** インカムで送る声（スイッチャーのマイク） */
+	#talk: MediaStream | null = null;
 
 	constructor(options: MediaLinksOptions) {
 		this.#options = options;
@@ -99,10 +102,26 @@ export class MediaLinks {
 
 		await Promise.all(
 			[...this.#outgoing.values()].map(async (link) => {
+				if (link.profile === 'talk' || !link.video) return;
 				await link.video.replaceTrack(video).catch(() => {});
 				await link.audio?.replaceTrack(audio).catch(() => {});
 				await this.#applyEncoding(link, video);
 			})
+		);
+	}
+
+	/**
+	 * インカムで送る声を設定する（スイッチャー用。やめるときは null）
+	 *
+	 * すでにつながっている相手には、接続を張り直さずに差し替える。
+	 */
+	async setTalkStream(stream: MediaStream | null): Promise<void> {
+		this.#talk = stream;
+		const voice = stream?.getAudioTracks()[0] ?? null;
+		await Promise.all(
+			[...this.#outgoing.values()]
+				.filter((link) => link.profile === 'talk')
+				.map((link) => link.audio?.replaceTrack(voice).catch(() => {}))
 		);
 	}
 
@@ -124,7 +143,7 @@ export class MediaLinks {
 		this.#audioMode = mode;
 		await Promise.all(
 			[...this.#outgoing]
-				.filter(([, link]) => link.audio !== null)
+				.filter(([, link]) => link.audio !== null && link.profile !== 'talk')
 				.map(([targetId, link]) => this.offerTo(targetId, link.profile))
 		);
 	}
@@ -144,27 +163,33 @@ export class MediaLinks {
 
 		// 映像と音声を、受ける側で1つのストリームとして扱えるようにまとめる
 		const group = new MediaStream();
-		const videoTransceiver = pc.addTransceiver(video ?? 'video', {
-			direction: 'sendonly',
-			streams: [group],
-			sendEncodings: [this.#encoding(profile, video)]
-		});
-		// 確認用の映像には音声を付けない（負荷と帯域の節約）
-		const audioTransceiver =
-			profile === 'program'
-				? pc.addTransceiver(audio ?? 'audio', {
-						direction: 'sendonly',
-						streams: [group],
-						sendEncodings: [{ maxBitrate: AUDIO_MODES[this.#audioMode].maxBitrate }]
-					})
-				: null;
+		let videoSender: RTCRtpSender | null = null;
+		let audioSender: RTCRtpSender | null = null;
+		if (profile === 'talk') {
+			// インカム: スイッチャーのマイクの声だけを送る
+			const voice = this.#talk?.getAudioTracks()[0] ?? null;
+			audioSender = pc.addTransceiver(voice ?? 'audio', {
+				direction: 'sendonly',
+				streams: [group],
+				sendEncodings: [{ maxBitrate: AUDIO_MODES.voice.maxBitrate }]
+			}).sender;
+		} else {
+			videoSender = pc.addTransceiver(video ?? 'video', {
+				direction: 'sendonly',
+				streams: [group],
+				sendEncodings: [this.#encoding(profile, video)]
+			}).sender;
+			// 確認用の映像には音声を付けない（負荷と帯域の節約）
+			if (profile === 'program') {
+				audioSender = pc.addTransceiver(audio ?? 'audio', {
+					direction: 'sendonly',
+					streams: [group],
+					sendEncodings: [{ maxBitrate: AUDIO_MODES[this.#audioMode].maxBitrate }]
+				}).sender;
+			}
+		}
 
-		const link: Outgoing = {
-			pc,
-			profile,
-			video: videoTransceiver.sender,
-			audio: audioTransceiver?.sender ?? null
-		};
+		const link: Outgoing = { pc, profile, video: videoSender, audio: audioSender };
 		this.#outgoing.set(targetId, link);
 		this.#options.onTargets?.(this.targets);
 
@@ -202,7 +227,7 @@ export class MediaLinks {
 				// 音声を送る接続では、相手の条件を「いまの音声の送り方」に合わせて読み替える
 				const sdp =
 					link.audio && description.sdp
-						? tuneOpusAnswer(description.sdp, this.#audioMode)
+						? tuneOpusAnswer(description.sdp, link.profile === 'talk' ? 'voice' : this.#audioMode)
 						: description.sdp;
 				await link.pc.setRemoteDescription({ type: 'answer', sdp });
 			} catch {
@@ -317,6 +342,7 @@ export class MediaLinks {
 	}
 
 	async #applyEncoding(link: Outgoing, video: MediaStreamTrack | null): Promise<void> {
+		if (!link.video) return;
 		try {
 			const parameters = link.video.getParameters();
 			if (!parameters.encodings?.length) return;

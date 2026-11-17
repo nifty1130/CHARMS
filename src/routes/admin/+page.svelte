@@ -37,6 +37,14 @@
 	const STORAGE_KEY = 'charms:admin';
 
 	const session = new ClientSession('admin');
+	/** 録画の操作（スイッチャーからの一斉録画で使う） */
+	let recorder: RecordControl | undefined = $state();
+
+	session.onCameraCommand = (command) => {
+		if (command.action !== 'record') return;
+		if (command.on) recorder?.remoteStart();
+		else recorder?.remoteStop();
+	};
 	const role = roleOf('admin');
 	const tally = $derived(tallyFor(session.id, session.snapshot.routes));
 
@@ -232,6 +240,7 @@
 				/>
 				{#if session.snapshot.settings.allowRecording}
 					<RecordControl
+						bind:this={recorder}
 						getStream={() => stream}
 						label={session.name}
 						description="このテロップの映像を録画します"

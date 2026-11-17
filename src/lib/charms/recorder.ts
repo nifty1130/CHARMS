@@ -47,6 +47,13 @@ export interface RecordingOptions {
 	onProgress?: (bytes: number) => void;
 	/** 録画が（エラーなどで）勝手に止まったとき */
 	onEnd?: (error?: Error) => void;
+	/**
+	 * 保存先を先に選んでもらうか（既定: 選べるブラウザでは選んでもらう）
+	 *
+	 * 遠隔操作で始めるときは、その端末で画面を操作していないので保存先を選べない。
+	 * false にすると、メモリにためて、止めたときにダウンロードする。
+	 */
+	picker?: boolean;
 }
 
 export interface Recording {
@@ -78,7 +85,7 @@ export async function startRecording(
 	const fileName = recordingFileName(options.label, format.extension);
 
 	let writable: FileSystemWritableFileStream | null = null;
-	if (canPickFile()) {
+	if (canPickFile() && options.picker !== false) {
 		try {
 			const handle = await window.showSaveFilePicker({
 				suggestedName: fileName,
