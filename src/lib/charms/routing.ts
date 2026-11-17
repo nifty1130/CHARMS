@@ -8,6 +8,7 @@
 import {
 	HOST_ID,
 	isSourceRole,
+	type Layout,
 	type LinkProfile,
 	type MonitorTarget,
 	type NodeInfo,
@@ -27,10 +28,20 @@ export function linkKey(sourceId: string, sinkId: string): string {
 }
 
 /**
+ * モニターに重ねて（並べて）出している、もう1つの映像
+ *
+ * @returns 映像入力の ID。1画面のとき、または選ばれていないときは null
+ */
+export function secondaryOf(route: Route | undefined): string | null {
+	if (!route || !route.layout || route.layout === 'single') return null;
+	return route.sub ?? null;
+}
+
+/**
  * いま必要な映像接続をすべて挙げる
  *
  * - 映像を出せる状態のカメラ・テロップ → ホストと全スイッチャー（確認用の小さな映像）
- * - 各モニターの本番・予告に選ばれた入力 → そのモニター（本番用の映像）
+ * - 各モニターの本番・予告に選ばれた入力、重ねる映像 → そのモニター（本番用の映像）
  */
 export function desiredLinks(nodes: NodeInfo[], routes: Route[]): DesiredLink[] {
 	const live = new Set(nodes.filter((n) => isSourceRole(n.role) && n.live).map((n) => n.id));
@@ -46,7 +57,7 @@ export function desiredLinks(nodes: NodeInfo[], routes: Route[]): DesiredLink[] 
 	}
 	for (const route of routes) {
 		if (!monitors.has(route.monitorId)) continue;
-		for (const sourceId of new Set([route.program, route.preview])) {
+		for (const sourceId of new Set([route.program, route.preview, secondaryOf(route)])) {
 			if (sourceId && live.has(sourceId)) {
 				links.push({ sourceId, sinkId: route.monitorId, profile: 'program' });
 			}
@@ -70,11 +81,17 @@ export function syncRoutes(routes: Route[], nodes: NodeInfo[]): Route[] {
 		.filter((n) => n.role === 'monitor')
 		.map((monitor) => {
 			const current = routes.find((r) => r.monitorId === monitor.id);
-			return {
+			const route: Route = {
 				monitorId: monitor.id,
 				program: keep(current?.program ?? null),
 				preview: keep(current?.preview ?? null)
 			};
+			// 画面の作り方は、1画面以外のときだけ持たせる
+			if (current?.layout && current.layout !== 'single') {
+				route.layout = current.layout;
+				route.sub = keep(current.sub ?? null);
+			}
+			return route;
 		});
 }
 
@@ -125,6 +142,27 @@ export function applyTake(routes: Route[], target: MonitorTarget): Route[] {
 	});
 }
 
+/**
+ * モニターの画面の作り方（ワイプ・2画面・テロップ重ね）を変える
+ *
+ * @param layout 画面の作り方
+ * @param sub 重ねる・並べる映像（`single` のときは使わない）
+ */
+export function applyLayout(
+	routes: Route[],
+	target: MonitorTarget,
+	layout: Layout,
+	sub: string | null
+): Route[] {
+	const matches = matcher(target);
+	return routes.map((route) => {
+		if (!matches(route.monitorId)) return route;
+		const { monitorId, program, preview } = route;
+		if (layout === 'single') return { monitorId, program, preview };
+		return { monitorId, program, preview, layout, sub };
+	});
+}
+
 /** 2つの接続一覧の差分 */
 export interface LinkDiff {
 	/** 新しく張る接続 */
@@ -155,7 +193,12 @@ export function diffLinks(desired: DesiredLink[], active: Iterable<string>): Lin
  */
 export function tallyFor(sourceId: string, routes: Route[]): { program: string[]; preview: string[] } {
 	return {
-		program: routes.filter((r) => r.program === sourceId).map((r) => r.monitorId),
-		preview: routes.filter((r) => r.preview === sourceId && r.program !== sourceId).map((r) => r.monitorId)
+		// 重ねて（並べて）出している映像も、画面に出ているので「本番」として扱う
+		program: routes
+			.filter((r) => r.program === sourceId || secondaryOf(r) === sourceId)
+			.map((r) => r.monitorId),
+		preview: routes
+			.filter((r) => r.preview === sourceId && r.program !== sourceId && secondaryOf(r) !== sourceId)
+			.map((r) => r.monitorId)
 	};
 }

@@ -25,6 +25,7 @@ import { MediaLinks } from './media-links';
 import { Pairing } from './pairing.svelte';
 import {
 	HOST_ID,
+	LAYOUTS,
 	ROLE_DEFAULTS,
 	cleanName,
 	emptySnapshot,
@@ -34,14 +35,17 @@ import {
 	type CameraCommand,
 	type ClientMessage,
 	type HostMessage,
+	type Layout,
 	type MonitorCommand,
 	type MonitorTarget,
+	type NetInfo,
 	type NodeInfo,
 	type NodeRole,
 	type ResumeInfo,
 	type Route,
 	type SessionSettings,
-	type SessionSnapshot
+	type SessionSnapshot,
+	type ZoomInfo
 } from './protocol';
 import {
 	generateRoomCode,
@@ -51,10 +55,30 @@ import {
 	type RoomMessage,
 	type RoomStatus
 } from './room';
-import { applyRoute, applyTake, desiredLinks, diffLinks, linkKey, syncRoutes } from './routing';
+import {
+	applyLayout,
+	applyRoute,
+	applyTake,
+	desiredLinks,
+	diffLinks,
+	linkKey,
+	syncRoutes
+} from './routing';
 import type { SwitcherApi } from './switcher-api';
 
 const NODE_ROLES: NodeRole[] = ['camera', 'admin', 'monitor', 'controller'];
+
+function isZoomInfo(value: unknown): value is ZoomInfo {
+	if (typeof value !== 'object' || value === null) return false;
+	const { min, max, step, value: current } = value as Record<string, unknown>;
+	return [min, max, step, current].every((n) => typeof n === 'number' && Number.isFinite(n));
+}
+
+function isNetInfo(value: unknown): value is NetInfo {
+	if (typeof value !== 'object' || value === null) return false;
+	const { relay, quality } = value as Record<string, unknown>;
+	return typeof relay === 'boolean' && (quality === 'good' || quality === 'fair' || quality === 'poor');
+}
 
 /** 映像接続が失敗したとき、張り直すまでの待ち時間（失敗が続くほど長くする） */
 const RETRY_BASE_MS = 1000;
@@ -341,6 +365,13 @@ export class HostSession implements SwitcherApi {
 		this.#publish();
 	}
 
+	setLayout(monitors: MonitorTarget, layout: Layout, sub: string | null): void {
+		if (!LAYOUTS.includes(layout)) return;
+		if (sub !== null && !isSourceRole(this.#nodes.get(sub)?.info.role ?? 'monitor')) return;
+		this.#routes = applyLayout(this.#routes, monitors, layout, sub);
+		this.#publish();
+	}
+
 	rename(id: string, name: string): void {
 		const entry = this.#nodes.get(id);
 		if (!entry) return;
@@ -434,6 +465,12 @@ export class HostSession implements SwitcherApi {
 					info.audioMode = message.audioMode;
 				}
 				if (typeof message.sound === 'boolean') info.sound = message.sound;
+				if (message.zoom === null) delete info.zoom;
+				else if (isZoomInfo(message.zoom)) info.zoom = message.zoom;
+				if (message.torch === null) delete info.torch;
+				else if (typeof message.torch === 'boolean') info.torch = message.torch;
+				if (message.net === null) delete info.net;
+				else if (isNetInfo(message.net)) info.net = message.net;
 				entry.info = info;
 				this.#publish();
 				break;
@@ -447,6 +484,12 @@ export class HostSession implements SwitcherApi {
 
 			case 'take':
 				if (entry.info.role === 'controller') this.take(message.monitors);
+				break;
+
+			case 'layout':
+				if (entry.info.role === 'controller') {
+					this.setLayout(message.monitors, message.layout, message.sub ?? null);
+				}
 				break;
 
 			case 'camera_control':

@@ -1,13 +1,16 @@
 <script lang="ts">
 	import {
 		isSourceRole,
+		type Layout,
 		type MonitorTarget,
 		type NodeInfo,
 		type QualityId
 	} from '$lib/charms/protocol';
 	import { AUDIO_MODES, AUDIO_MODE_ORDER } from '$lib/charms/audio';
 	import { QUALITY_ORDER, QUALITY_PRESETS } from '$lib/charms/quality';
+	import { secondaryOf } from '$lib/charms/routing';
 	import type { SwitcherApi } from '$lib/charms/switcher-api';
+	import NetBadge from './NetBadge.svelte';
 	import VideoView from './VideoView.svelte';
 
 	interface Props {
@@ -18,6 +21,13 @@
 	let { api }: Props = $props();
 
 	const MODE_KEY = 'charms:switcher:two-stage';
+
+	const LAYOUT_OPTIONS: { id: Layout; label: string; detail: string }[] = [
+		{ id: 'single', label: '1画面', detail: '重ねずに、ふつうに映す' },
+		{ id: 'pip', label: 'ワイプ', detail: '隅に小さく重ねる' },
+		{ id: 'split', label: '2画面', detail: '左右に並べる' },
+		{ id: 'overlay', label: 'テロップを重ねる', detail: '文字だけを映像の上に出す' }
+	];
 
 	const sources = $derived(api.snapshot.nodes.filter((node) => isSourceRole(node.role)));
 	const monitors = $derived(api.snapshot.nodes.filter((node) => node.role === 'monitor'));
@@ -63,6 +73,40 @@
 	);
 	const editing = $derived(sources.find((source) => source.id === editingId) ?? null);
 
+	/** 選んでいるモニターの、画面の作り方（モニターによって違うときは null） */
+	const currentLayout = $derived.by<Layout | null>(() => {
+		const layouts = new Set(targetRoutes.map((route) => route.layout ?? 'single'));
+		return layouts.size === 1 ? [...layouts][0] : null;
+	});
+	/** 選んでいるモニターに重ねている映像（モニターによって違うとき、重ねていないときは null） */
+	const currentSub = $derived.by<string | null>(() => {
+		const subs = new Set(targetRoutes.map((route) => secondaryOf(route)));
+		return subs.size === 1 ? [...subs][0] : null;
+	});
+
+	function chooseLayout(layout: Layout) {
+		if (!hasTarget) return;
+		if (layout === 'single') {
+			api.setLayout(target, 'single', null);
+			return;
+		}
+		let sub = currentSub;
+		if (!sub) {
+			// 重ねる映像がまだ選ばれていなければ、それらしいものを選んでおく
+			// （テロップ重ねならテロップ、それ以外は本番に出ていないカメラ）
+			const onAir = new Set(targetRoutes.map((route) => route.program));
+			const free = sources.filter((source) => source.live && !onAir.has(source.id));
+			const wanted = layout === 'overlay' ? 'admin' : 'camera';
+			sub = (free.find((source) => source.role === wanted) ?? free[0])?.id ?? null;
+		}
+		api.setLayout(target, layout, sub);
+	}
+
+	function chooseSub(sourceId: string) {
+		if (!hasTarget) return;
+		api.setLayout(target, currentLayout && currentLayout !== 'single' ? currentLayout : 'pip', sourceId);
+	}
+
 	function nameOf(id: string | null): string {
 		if (!id) return 'なし';
 		return api.snapshot.nodes.find((node) => node.id === id)?.name ?? 'なし';
@@ -88,7 +132,8 @@
 		const total = targetRoutes.length;
 		return {
 			program: total > 0 && program === total ? 'all' : program > 0 ? 'some' : 'none',
-			preview: preview > 0
+			preview: preview > 0,
+			sub: sourceId !== null && targetRoutes.some((route) => secondaryOf(route) === sourceId)
 		} as const;
 	}
 
@@ -116,6 +161,20 @@
 
 	function setQuality(quality: QualityId) {
 		if (editing) api.cameraControl(editing.id, { action: 'quality', quality });
+	}
+
+	let zoomTimer: ReturnType<typeof setTimeout> | undefined;
+	let zoomPending: { id: string; value: number } | null = null;
+
+	/** つまみを動かしている間、ズームの指示を送りすぎないように間引く */
+	function remoteZoom(id: string, value: number) {
+		zoomPending = { id, value };
+		if (zoomTimer) return;
+		zoomTimer = setTimeout(() => {
+			zoomTimer = undefined;
+			if (zoomPending) api.cameraControl(zoomPending.id, { action: 'zoom', value: zoomPending.value });
+			zoomPending = null;
+		}, 120);
 	}
 
 	function kindLabel(source: NodeInfo): string {
@@ -188,6 +247,7 @@
 							{#if monitor.recording}
 								<span class="text-xs font-medium text-red-500">● 録画中</span>
 							{/if}
+							<span class="flex items-center gap-1 text-xs font-normal"><NetBadge net={monitor.net} /></span>
 						</span>
 						<span class="flex items-center gap-1.5 text-xs font-normal {on ? 'text-zinc-700' : 'text-zinc-400'}">
 							<span class="size-2 rounded-full bg-red-500"></span>本番: {nameOf(route?.program ?? null)}
@@ -297,6 +357,9 @@
 								{#if use.preview}
 									<span class="bg-emerald-600 px-2 py-0.5 text-xs font-bold text-white">予告</span>
 								{/if}
+								{#if use.sub}
+									<span class="bg-sky-600 px-2 py-0.5 text-xs font-bold text-white">重ね</span>
+								{/if}
 							</span>
 						</button>
 
@@ -311,6 +374,7 @@
 									{#if source.hasAudio && source.muted}
 										<span class="font-medium text-amber-300">マイク消音中</span>
 									{/if}
+									<NetBadge net={source.net} />
 								</div>
 							</div>
 							<button
@@ -403,6 +467,36 @@
 							</div>
 						</div>
 
+						{#if editing.zoom || editing.torch !== undefined}
+							<div>
+								<span class="text-sm text-zinc-300">ズーム・ライト（カメラ端末を遠隔で操作します）</span>
+								<div class="mt-1 flex flex-wrap items-center gap-3">
+									{#if editing.zoom}
+										<input
+											type="range"
+											class="min-w-40 flex-1 accent-zinc-100"
+											min={editing.zoom.min}
+											max={editing.zoom.max}
+											step={editing.zoom.step}
+											value={editing.zoom.value}
+											aria-label="{editing.name} のズーム"
+											oninput={(event) => remoteZoom(editing.id, Number(event.currentTarget.value))}
+										/>
+									{/if}
+									{#if editing.torch !== undefined}
+										<button
+											type="button"
+											class="btn {editing.torch ? 'btn-on' : ''}"
+											aria-pressed={editing.torch}
+											onclick={() => api.cameraControl(editing.id, { action: 'torch', on: !editing.torch })}
+										>
+											{editing.torch ? 'ライトを消す' : 'ライトを点ける'}
+										</button>
+									{/if}
+								</div>
+							</div>
+						{/if}
+
 						{#if editing.hasAudio}
 							<div>
 								<span class="text-sm text-zinc-300">音声（カメラ端末を遠隔で切り替えます）</span>
@@ -454,5 +548,59 @@
 				</p>
 			</div>
 		{/if}
+	</section>
+
+	<!-- もう1つの映像を重ねる・並べる -->
+	<section class="panel" aria-label="重ねる・並べる">
+		<div class="panel-head">
+			<h2 class="panel-title">③ もう1つの映像を重ねる・並べる</h2>
+			<span class="hint">ワイプ・2画面・テロップ</span>
+		</div>
+		<div class="space-y-3 p-3">
+			<div class="flex flex-wrap gap-2" role="group" aria-label="画面の作り方">
+				{#each LAYOUT_OPTIONS as option (option.id)}
+					<button
+						type="button"
+						class="btn h-auto flex-col items-start gap-0 py-2 text-left {currentLayout === option.id
+							? 'btn-on'
+							: ''}"
+						aria-pressed={currentLayout === option.id}
+						disabled={!hasTarget}
+						onclick={() => chooseLayout(option.id)}
+					>
+						<span class="text-sm font-semibold">{option.label}</span>
+						<span class="text-xs font-normal opacity-70">{option.detail}</span>
+					</button>
+				{/each}
+			</div>
+
+			{#if currentLayout !== 'single'}
+				<div>
+					<span class="text-sm text-zinc-300">重ねる（並べる）映像</span>
+					<div class="mt-1 flex flex-wrap gap-2" role="group" aria-label="重ねる映像">
+						{#each sources as source (source.id)}
+							<button
+								type="button"
+								class="btn {currentSub === source.id ? 'btn-on' : ''}"
+								aria-pressed={currentSub === source.id}
+								disabled={!source.live || !hasTarget}
+								onclick={() => chooseSub(source.id)}
+							>
+								{source.name}
+							</button>
+						{:else}
+							<span class="hint">カメラやテロップがつながると、ここで選べます。</span>
+						{/each}
+					</div>
+					<p class="hint mt-2">
+						上の「② どの映像を映すか」で選んだ映像が下地になり、ここで選んだ映像がその上（または右）に出ます。
+						{#if currentLayout === 'overlay'}
+							テロップは黒い部分が透けて、文字だけが重なります。
+						{/if}
+						音は、下地の映像のものだけが出ます。
+					</p>
+				</div>
+			{/if}
+		</div>
 	</section>
 </div>

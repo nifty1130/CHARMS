@@ -36,6 +36,37 @@ export type AudioMode = 'voice' | 'music';
  */
 export type LinkProfile = 'thumbnail' | 'program';
 
+/**
+ * モニターの画面の作り方
+ *
+ * - `single`: 1つの映像を画面いっぱいに映す
+ * - `pip`: 本番の映像の隅に、もう1つの映像を小さく重ねる（ワイプ）
+ * - `split`: 2つの映像を左右に並べる
+ * - `overlay`: 本番の映像の上に、もう1つの映像の明るい部分だけを重ねる（テロップ用。黒い部分は透ける）
+ */
+export type Layout = 'single' | 'pip' | 'split' | 'overlay';
+
+export const LAYOUTS: Layout[] = ['single', 'pip', 'split', 'overlay'];
+
+/** カメラのズームできる範囲と、いまの値 */
+export interface ZoomInfo {
+	min: number;
+	max: number;
+	step: number;
+	value: number;
+}
+
+/**
+ * 通信の状態のまとめ
+ *
+ * - `relay`: 中継サーバー（TURN）を通っている映像接続があるか
+ * - `quality`: いちばん状態の悪い映像接続の評価
+ */
+export interface NetInfo {
+	relay: boolean;
+	quality: 'good' | 'fair' | 'poor';
+}
+
 /** ホストにつながっている端末1台の情報 */
 export interface NodeInfo {
 	/** ホストが割り当てる番号つきの ID（例: cam1）。つながっている間は変わらない */
@@ -61,6 +92,12 @@ export interface NodeInfo {
 	audioMode?: AudioMode;
 	/** 音を出しているか（モニターのみ） */
 	sound?: boolean;
+	/** ズームできるカメラなら、その範囲といまの値 */
+	zoom?: ZoomInfo;
+	/** ライトを点けられるカメラなら、いま点いているか（点けられない端末では省略） */
+	torch?: boolean;
+	/** 通信の状態（映像接続があるときだけ） */
+	net?: NetInfo;
 }
 
 /**
@@ -73,6 +110,10 @@ export interface Route {
 	monitorId: string;
 	program: string | null;
 	preview: string | null;
+	/** 画面の作り方（省略時は `single`） */
+	layout?: Layout;
+	/** 重ねる・並べる、もう1つの映像（`single` 以外のときに使う） */
+	sub?: string | null;
 }
 
 /** 全体の設定（ホストが決める） */
@@ -99,7 +140,9 @@ export type CameraCommand =
 	| { action: 'quality'; quality: QualityId }
 	| { action: 'flip' }
 	| { action: 'mute'; muted: boolean }
-	| { action: 'audio_mode'; mode: AudioMode };
+	| { action: 'audio_mode'; mode: AudioMode }
+	| { action: 'zoom'; value: number }
+	| { action: 'torch'; on: boolean };
 
 /** スイッチャーからモニターへの遠隔操作 */
 export type MonitorCommand = { action: 'sound'; on: boolean };
@@ -136,9 +179,13 @@ export type ClientMessage =
 			muted?: boolean;
 			audioMode?: AudioMode;
 			sound?: boolean;
+			zoom?: ZoomInfo | null;
+			torch?: boolean | null;
+			net?: NetInfo | null;
 	  }
 	| { type: 'route'; monitors: MonitorTarget; stage: 'program' | 'preview'; sourceId: string | null }
 	| { type: 'take'; monitors: MonitorTarget }
+	| { type: 'layout'; monitors: MonitorTarget; layout: Layout; sub: string | null }
 	| { type: 'signal'; toId: string; description: RTCSessionDescriptionInit }
 	| { type: 'link_failed'; sourceId: string; sinkId: string }
 	| { type: 'camera_control'; targetId: string; command: CameraCommand }

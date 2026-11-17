@@ -5,7 +5,13 @@
  * ホストは自分で処理し、スイッチャーはホストに依頼する、という違いだけを吸収する。
  */
 
-import type { CameraCommand, MonitorCommand, MonitorTarget, SessionSnapshot } from './protocol';
+import type {
+	CameraCommand,
+	Layout,
+	MonitorCommand,
+	MonitorTarget,
+	SessionSnapshot
+} from './protocol';
 
 export interface SwitcherApi {
 	/** いまの状況（端末の一覧、各モニターに映している映像、設定） */
@@ -16,6 +22,8 @@ export interface SwitcherApi {
 	route(monitors: MonitorTarget, stage: 'program' | 'preview', sourceId: string | null): void;
 	/** 予告の映像を本番に出す */
 	take(monitors: MonitorTarget): void;
+	/** モニターの画面の作り方（ワイプ・2画面・テロップ重ね）と、重ねる映像を選ぶ */
+	setLayout(monitors: MonitorTarget, layout: Layout, sub: string | null): void;
 	/** 端末の名前を変える */
 	rename(id: string, name: string): void;
 	/** カメラを遠隔操作する */

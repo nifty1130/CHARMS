@@ -1,4 +1,5 @@
 <script lang="ts">
+	import LinkStatsTable from '../../components/LinkStatsTable.svelte';
 	import NameEditor from '../../components/NameEditor.svelte';
 	import NodeShell from '../../components/NodeShell.svelte';
 	import RecordControl from '../../components/RecordControl.svelte';
@@ -11,8 +12,9 @@
 		LevelMeter,
 		audioConstraints
 	} from '$lib/charms/audio';
+	import { readTorch, readZoom, setTorch, setZoom } from '$lib/charms/camera-controls';
 	import { ClientSession } from '$lib/charms/client.svelte';
-	import { HOST_ID, type AudioMode, type QualityId } from '$lib/charms/protocol';
+	import { HOST_ID, type AudioMode, type QualityId, type ZoomInfo } from '$lib/charms/protocol';
 	import {
 		DEFAULT_QUALITY,
 		QUALITY_ORDER,
@@ -41,6 +43,10 @@
 	let muted = $state(false);
 	/** マイクの音量（0〜1） */
 	let level = $state(0);
+	/** ズームできるカメラなら、その範囲といまの値 */
+	let zoom = $state.raw<ZoomInfo | null>(null);
+	/** ライトのあるカメラなら、点いているか（ないカメラでは null） */
+	let torch = $state<boolean | null>(null);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 
@@ -86,6 +92,12 @@
 			case 'audio_mode':
 				void changeAudio({ mode: command.mode });
 				break;
+			case 'zoom':
+				void applyZoom(command.value);
+				break;
+			case 'torch':
+				void applyTorch(command.on);
+				break;
 		}
 	};
 
@@ -121,7 +133,9 @@
 			canFlip: sourceKind === 'webcam' && cameras.length > 1,
 			hasAudio: (stream?.getAudioTracks().length ?? 0) > 0,
 			muted,
-			audioMode
+			audioMode,
+			zoom,
+			torch
 		});
 	}
 
@@ -152,6 +166,9 @@
 
 		stream = next;
 		sourceKind = kind;
+		// ズームとライトは、対応しているカメラでだけ使える
+		zoom = kind === 'webcam' ? readZoom(video) : null;
+		torch = kind === 'webcam' ? readTorch(video) : null;
 		await session.media.setLocalStream(next);
 		if (previous !== next) stopTracks(previous);
 		report();
@@ -164,7 +181,8 @@
 			// スマホでは同時に2つのカメラを開けないことがあるので、先にいまの映像を止める
 			if (sourceKind === 'webcam') stream?.getVideoTracks().forEach((track) => track.stop());
 
-			const video = videoConstraints(quality, deviceId);
+			// zoom: true は「ズームも使いたい」という合図。ブラウザによっては、これがないとズームを操作できない
+			const video = { ...videoConstraints(quality, deviceId), zoom: true } as MediaTrackConstraints;
 			let next: MediaStream;
 			try {
 				next = await navigator.mediaDevices.getUserMedia({
@@ -221,6 +239,8 @@
 		stopTracks(stream);
 		stream = null;
 		sourceKind = null;
+		zoom = null;
+		torch = null;
 		await session.media.setLocalStream(null);
 		report();
 	}
@@ -236,6 +256,20 @@
 			// 解像度が変わったので、確認用の小さな映像の縮小率を計算し直す
 			await session.media.setLocalStream(stream);
 		}
+		report();
+	}
+
+	async function applyZoom(value: number) {
+		const video = stream?.getVideoTracks()[0];
+		if (!video || sourceKind !== 'webcam') return;
+		zoom = await setZoom(video, value);
+		report();
+	}
+
+	async function applyTorch(on: boolean) {
+		const video = stream?.getVideoTracks()[0];
+		if (!video || sourceKind !== 'webcam') return;
+		torch = await setTorch(video, on);
 		report();
 	}
 
@@ -494,6 +528,33 @@
 				</section>
 
 				<section class="panel space-y-3 p-4">
+					{#if zoom}
+						<label class="block">
+							<span class="flex items-baseline justify-between text-sm text-zinc-300">
+								<span>ズーム</span>
+								<span class="font-mono text-xs text-zinc-500">{zoom.value.toFixed(1)}</span>
+							</span>
+							<input
+								type="range"
+								class="mt-1 w-full accent-zinc-100"
+								min={zoom.min}
+								max={zoom.max}
+								step={zoom.step}
+								value={zoom.value}
+								oninput={(event) => applyZoom(Number(event.currentTarget.value))}
+							/>
+						</label>
+					{/if}
+					{#if torch !== null}
+						<button
+							type="button"
+							class="btn {torch ? 'btn-on' : ''}"
+							aria-pressed={torch}
+							onclick={() => applyTorch(!torch)}
+						>
+							{torch ? 'ライトを消す' : 'ライトを点ける'}
+						</button>
+					{/if}
 					{#if sourceKind === 'webcam' && cameras.length > 1}
 						<label class="block">
 							<span class="text-sm text-zinc-300">使うカメラ</span>
@@ -537,6 +598,15 @@
 						/>
 					{/if}
 				</section>
+
+				<details class="panel">
+					<summary class="cursor-pointer px-4 py-3 text-sm text-zinc-300 hover:text-zinc-100">
+						通信の状態
+					</summary>
+					<div class="border-t border-zinc-800">
+						<LinkStatsTable links={session.linkStats} nameOf={targetName} />
+					</div>
+				</details>
 			</div>
 		</div>
 	{/if}

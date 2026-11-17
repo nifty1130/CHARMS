@@ -2,6 +2,7 @@
 	import AppHeader from '../../components/AppHeader.svelte';
 	import ConnectPanel from '../../components/ConnectPanel.svelte';
 	import InvitePanel from '../../components/InvitePanel.svelte';
+	import NetBadge from '../../components/NetBadge.svelte';
 	import Switcher from '../../components/Switcher.svelte';
 	import { HostSession } from '$lib/charms/host.svelte';
 	import { ROLE_DEFAULTS, type NodeInfo, type NodeRole } from '$lib/charms/protocol';
@@ -227,6 +228,7 @@
 																: 'bg-emerald-400'}"
 														></span>
 														<span>{statusOf(node)}</span>
+														<NetBadge net={node.net} />
 														{#if node.recording}
 															<span class="font-medium text-red-500">● 録画中</span>
 														{/if}
