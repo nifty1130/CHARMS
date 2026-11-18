@@ -94,11 +94,13 @@
 
 	/** スイッチャーからの「一斉に録画」で始める */
 	export function remoteStart(): void {
+		console.info('[rec] remoteStart', !!recording, busy, supported);
 		if (!recording && !busy && supported) void start(true);
 	}
 
 	/** スイッチャーからの「一斉に停止」で止める */
 	export function remoteStop(): void {
+		console.info('[rec] remoteStop', !!recording, busy);
 		void stop();
 	}
 

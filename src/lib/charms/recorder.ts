@@ -112,12 +112,14 @@ export async function startRecording(
 	}
 
 	const recorder = new MediaRecorder(stream, { mimeType: format.mimeType });
+	console.info('[rec] start', format.mimeType, JSON.stringify(stream.getTracks().map((t) => [t.kind, t.readyState, t.muted, t.enabled])));
 	const chunks: Blob[] = [];
 	let bytes = 0;
 	let writing: Promise<unknown> = Promise.resolve();
 	let stopped = false;
 
 	recorder.ondataavailable = (event) => {
+		console.info('[rec] data', event.data.size);
 		if (event.data.size === 0) return;
 		bytes += event.data.size;
 		options.onProgress?.(bytes);
@@ -144,18 +146,21 @@ export async function startRecording(
 
 	const ended = new Promise<boolean>((resolve) => {
 		recorder.onstop = () => {
+			console.info('[rec] onstop', chunks.length, bytes);
 			void finish().then((saved) => {
 				resolve(saved);
 				if (!stopped) options.onEnd?.(saved ? undefined : new Error(NO_DATA_MESSAGE));
 			});
 		};
 	});
-	recorder.onerror = () => {
+	recorder.onerror = (event) => {
+		console.info('[rec] error', String((event as unknown as { error?: unknown }).error));
 		if (!stopped) options.onEnd?.(new Error('録画中にエラーが起きました'));
 	};
 
 	// 1秒ごとにデータを受け取る（途中で止まっても、そこまでは残る）
 	recorder.start(1000);
+	console.info('[rec] state', recorder.state);
 
 	return {
 		direct: writable !== null,
@@ -264,6 +269,7 @@ export class ProgramMixer {
 		const start = this.#audio.currentTime;
 		await wait(CLOCK_CHECK_MS);
 		const advancing = this.#audio.state === 'running' && this.#audio.currentTime > start;
+		console.info('[rec] prepare', this.#audio.state, start, this.#audio.currentTime, advancing);
 		if (!advancing) {
 			for (const track of this.stream.getAudioTracks()) this.stream.removeTrack(track);
 		}

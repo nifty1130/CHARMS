@@ -71,6 +71,8 @@ test('スイッチャーから、全端末の録画をまとめて始めて止�
 	const host = await openHost(context);
 	const camera = await join(context, '/camera/', 'カメラ 1');
 	const monitor = await join(context, '/monitor/', 'モニター 1');
+	monitor.on('console', (message) => console.log('[monitor]', message.text()));
+	camera.on('console', (message) => message.text().startsWith('[rec]') && console.log('[camera]', message.text()));
 	const controller = await join(context, '/controller/', 'スイッチャー 1');
 	await startCamera(camera);
 	await controller.getByRole('button', { name: 'カメラ 1 を映す' }).click();
