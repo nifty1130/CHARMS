@@ -57,8 +57,12 @@ export interface RecordingOptions {
 }
 
 export interface Recording {
-	/** 録画を止めて、ファイルを保存する */
-	stop(): Promise<void>;
+	/**
+	 * 録画を止めて、ファイルを保存する
+	 *
+	 * @returns 保存できたか（録画のデータが1つも取れなかったときは false）
+	 */
+	stop(): Promise<boolean>;
 	/** 保存先をあらかじめ選んで、ディスクに直接書き込んでいるか（長時間の録画に向く） */
 	readonly direct: boolean;
 }
@@ -126,20 +130,23 @@ export async function startRecording(
 		}
 	};
 
-	const finish = async () => {
+	/** @returns 保存できたか */
+	const finish = async (): Promise<boolean> => {
 		await writing;
 		if (writable) {
 			await writable.close().catch(() => {});
-		} else if (chunks.length > 0) {
-			download(new Blob(chunks, { type: format.mimeType.split(';')[0] }), fileName);
+			return bytes > 0;
 		}
+		if (chunks.length === 0) return false;
+		download(new Blob(chunks, { type: format.mimeType.split(';')[0] }), fileName);
+		return true;
 	};
 
-	const ended = new Promise<void>((resolve) => {
+	const ended = new Promise<boolean>((resolve) => {
 		recorder.onstop = () => {
-			void finish().then(() => {
-				resolve();
-				if (!stopped) options.onEnd?.();
+			void finish().then((saved) => {
+				resolve(saved);
+				if (!stopped) options.onEnd?.(saved ? undefined : new Error(NO_DATA_MESSAGE));
 			});
 		};
 	});
@@ -155,10 +162,13 @@ export async function startRecording(
 		async stop() {
 			stopped = true;
 			if (recorder.state !== 'inactive') recorder.stop();
-			await ended;
+			return ended;
 		}
 	};
 }
+
+/** 録画のデータが1つも取れなかったときの知らせ */
+export const NO_DATA_MESSAGE = '録画のデータが取れなかったため、ファイルを保存できませんでした。';
 
 /** ブラウザのダウンロードとしてファイルを保存する */
 function download(blob: Blob, fileName: string): void {
@@ -188,6 +198,9 @@ export function formatBytes(bytes: number): string {
 	if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 	return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
+
+/** 音をまとめる仕組みの時計が進んでいるかを確かめる時間 */
+const CLOCK_CHECK_MS = 300;
 
 /**
  * ProgramMixer — モニターに映している映像を、1本の映像にまとめる
@@ -224,6 +237,36 @@ export class ProgramMixer {
 
 		this.#draw();
 		this.#timer = setInterval(() => this.#draw(), 1000 / frameRate);
+	}
+
+	/** 録画に音が入るか（prepare で、音をまとめる仕組みが動かなかったときは false） */
+	get audible(): boolean {
+		return this.stream.getAudioTracks().length > 0;
+	}
+
+	/**
+	 * 録画を始める前に呼ぶ。音をまとめる仕組み（AudioContext）が動き出すのを待ち、動かなければ
+	 * 音なしで録画する（録画する映像から、音のトラックを外す）
+	 *
+	 * ブラウザは、画面に一度も触れていないページ（招待リンクで自動でつながったモニターなど）では、
+	 * 音の仕組みを止めたままにする。そのまま録画すると、来ない音のデータを待ち続けて、
+	 * webm 形式で録画するブラウザ（Android・Linux の Chrome、Firefox）では、録画のデータが1つもできない。
+	 *
+	 * @param timeoutMs 動き出すのを待つ時間
+	 */
+	async prepare(timeoutMs = 1500): Promise<void> {
+		const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+		if (this.#audio.state !== 'running') {
+			await Promise.race([this.#audio.resume().catch(() => {}), wait(timeoutMs)]);
+		}
+		// 「動いている」と答えても、音を出す装置がない端末では、時計が進まず音のデータが来ないことがある。
+		// 時計が実際に進むかどうかで確かめる
+		const start = this.#audio.currentTime;
+		await wait(CLOCK_CHECK_MS);
+		const advancing = this.#audio.state === 'running' && this.#audio.currentTime > start;
+		if (!advancing) {
+			for (const track of this.stream.getAudioTracks()) this.stream.removeTrack(track);
+		}
 	}
 
 	/** いま画面に出している映像を指定する（何も出していないときは null） */
