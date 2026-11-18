@@ -110,6 +110,37 @@ test('端末のページを読み込み直しても、同じ端末として自�
 	await expectMonitorShowsVideo(monitor);
 });
 
+test('インカムを聞いていたカメラが読み込み直すと、「聞かない」に戻り、声も流れない', async ({ context }) => {
+	const host = await openHost(context);
+	const code = await roomCode(host);
+	const camera = await joinByCode(context, '/camera/', code, 'カメラ 1');
+	const controller = await joinByCode(context, '/controller/', code, 'スイッチャー 1');
+	await startCamera(camera);
+
+	await camera.getByRole('checkbox', { name: /インカムを聞く/ }).check();
+	await expect(controller.getByText('聞いている端末: カメラ 1')).toBeVisible();
+	await controller.getByRole('button', { name: 'インカムを入れる' }).click();
+	await expect(controller.getByText(/マイクの声が、聞いている端末に届いています/)).toBeVisible();
+	await expect.poll(() => audioCount(camera), { timeout: 20_000 }).toBe(1);
+
+	acceptLeaving(camera);
+	await camera.reload();
+	await expect(camera.getByRole('status').filter({ hasText: 'カメラ 1' })).toBeVisible({ timeout: 30_000 });
+	await startCamera(camera);
+
+	// カメラの画面は「聞かない」に戻る。スイッチャーにも、ホストが覚えていた古い状態は出ない
+	await expect(camera.getByRole('checkbox', { name: /インカムを聞く/ })).not.toBeChecked();
+	await expect(controller.getByText('聞いている端末はありません')).toBeVisible();
+	// 声の接続は張られない（少し待って、届かないことを確かめる）
+	await camera.waitForTimeout(3000);
+	expect(await audioCount(camera)).toBe(0);
+});
+
+/** インカムの声を鳴らすための audio 要素の数 */
+async function audioCount(page: Page): Promise<number> {
+	return page.locator('audio').count();
+}
+
 test('ホストのページを読み込み直しても、端末が自動で戻り、映像の割り当ても元に戻る', async ({
 	context
 }) => {
