@@ -67,6 +67,28 @@ test('インカム: スイッチャーの声が、聞く設定にしたカメラ
 	await expect.poll(() => hearsVoice(camera1), { timeout: 20_000 }).toBe(false);
 });
 
+/**
+ * 端末の録画が、指定した秒数以上続くまで待つ
+ *
+ * 録画を始めてすぐ止めると、遅い端末（CI など）では、映像の圧縮が最初のデータを作り終えず、
+ * 保存するものがないことがある。本番ではありえない短さなので、テストでは少し録画してから止める。
+ */
+async function recordFor(page: Page, seconds: number): Promise<void> {
+	await expect
+		.poll(
+			() =>
+				page.evaluate(() => {
+					const status = [...document.querySelectorAll('[role="status"]')].find((element) =>
+						element.textContent?.includes('録画中')
+					);
+					const match = status?.textContent?.match(/(\d+):(\d{2})/);
+					return match ? Number(match[1]) * 60 + Number(match[2]) : -1;
+				}),
+			{ timeout: 20_000 }
+		)
+		.toBeGreaterThanOrEqual(seconds);
+}
+
 test('スイッチャーから、全端末の録画をまとめて始めて止められる', async ({ context }) => {
 	const host = await openHost(context);
 	const camera = await join(context, '/camera/', 'カメラ 1');
@@ -83,6 +105,8 @@ test('スイッチャーから、全端末の録画をまとめて始めて止�
 	await controller.getByRole('button', { name: /全端末で録画を始める/ }).click();
 	await expect(controller.getByText('2台が録画中')).toBeVisible({ timeout: 20_000 });
 	await expect(camera.getByRole('button', { name: /録画を止めて保存/ })).toBeVisible();
+	await recordFor(camera, 2);
+	await recordFor(monitor, 2);
 
 	// 止めると、それぞれの端末にファイルが保存される
 	const downloads = Promise.all([camera.waitForEvent('download'), monitor.waitForEvent('download')]);
@@ -127,6 +151,7 @@ test('画面に触れていないモニター（ブラウザが音を止めて�
 	await expect(controller.getByText('2台が録画中')).toBeVisible({ timeout: 20_000 });
 	// 音なしで録画していることを、モニターの画面で知らせる
 	await expect(monitor.getByText(/音なしで録画しています/)).toBeAttached();
+	await recordFor(monitor, 2);
 
 	const download = monitor.waitForEvent('download');
 	await controller.getByRole('button', { name: /全端末の録画を止める/ }).click();
