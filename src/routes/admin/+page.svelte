@@ -1,21 +1,29 @@
 <script lang="ts">
+	import LyricsPanel from '../../components/LyricsPanel.svelte';
 	import NameEditor from '../../components/NameEditor.svelte';
 	import NodeShell from '../../components/NodeShell.svelte';
 	import RecordControl from '../../components/RecordControl.svelte';
 	import TallyBanner from '../../components/TallyBanner.svelte';
-	import VideoView from '../../components/VideoView.svelte';
-	import {
-		CAPTION_FRAME_RATE,
-		CAPTION_HEIGHT,
-		CAPTION_WIDTH,
-		drawCaption,
-		splitLyrics,
-		type Caption
-	} from '$lib/charms/caption';
+	import TelopLayer from '../../components/TelopLayer.svelte';
+	import TemplateEditor from '../../components/TemplateEditor.svelte';
 	import { ClientSession } from '$lib/charms/client.svelte';
 	import { tallyFor } from '$lib/charms/routing';
+	import {
+		drawTelop,
+		isBlankScene,
+		isBlankText,
+		mergeTemplates,
+		TELOP_FRAME_RATE,
+		TELOP_HEIGHT,
+		TELOP_WIDTH,
+		TITLE_TEMPLATE,
+		type TelopScene,
+		type TelopTemplate,
+		type TelopText
+	} from '$lib/charms/telop';
+	import { parseField } from '$lib/charms/telop-markdown';
 	import { roleOf } from '$lib/roles';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 
 	/** タイムテーブルの1行 */
 	interface Entry {
@@ -27,14 +35,21 @@
 
 	/** 端末に保存しておく内容（ページを開き直しても残る） */
 	interface Saved {
-		title: string;
-		subtitle: string;
-		lyricsTitle: string;
-		lyricsText: string;
+		script: string;
+		/** 「文字を出す」で選んでいる型 */
+		fieldTemplate: string;
+		/** 「文字を出す」の入力（型の ID → 枠の ID → 文字） */
+		fields: Record<string, Record<string, string>>;
 		entries: Entry[];
+		// 前の版の保存内容（読み込むときに引き継ぐ）
+		title?: string;
+		subtitle?: string;
+		lyricsTitle?: string;
+		lyricsText?: string;
 	}
 
 	const STORAGE_KEY = 'charms:admin';
+	const TEMPLATES_KEY = 'charms:telop-templates:v1';
 
 	const session = new ClientSession('admin');
 	/** 録画の操作（スイッチャーからの一斉録画で使う） */
@@ -48,58 +63,70 @@
 	const role = roleOf('admin');
 	const tally = $derived(tallyFor(session.id, session.snapshot.routes));
 
-	let tab = $state<'title' | 'lyrics' | 'timetable'>('title');
-	/** いま映像として出している内容 */
-	let shown = $state<Caption>({ title: '', subtitle: '' });
+	let tab = $state<'text' | 'lyrics' | 'timetable' | 'templates'>('text');
+	/** いま出している内容 */
+	let scene = $state.raw<TelopScene | null>(null);
 	let stream = $state.raw<MediaStream | null>(null);
 
-	// タイトル
-	let title = $state('');
-	let subtitle = $state('');
+	/** 型の一覧（調整した内容は端末に保存する） */
+	let templates = $state<TelopTemplate[]>(mergeTemplates(null));
+
+	// 文字を出す
+	let fieldTemplate = $state(TITLE_TEMPLATE);
+	let fields = $state<Record<string, Record<string, string>>>({});
+	const fieldTarget = $derived(templates.find((t) => t.id === fieldTemplate) ?? templates[0]);
 
 	// 歌詞
-	let lyricsTitle = $state('');
-	let lyricsText = $state('');
-	let editingLyrics = $state(true);
-	/** いま出している歌詞の行（出していないときは -1） */
-	let lyricIndex = $state(-1);
-	const lyrics = $derived(splitLyrics(lyricsText));
+	let script = $state('');
 
 	// タイムテーブル
 	let entries = $state<Entry[]>([]);
 	/** 最後に出した演目 */
 	let currentEntryId = $state<string | null>(null);
 
-	let loaded = false;
+	let loaded = $state(false);
 	let context: CanvasRenderingContext2D | null = null;
 
-	const isBlank = $derived(!shown.title.trim() && !shown.subtitle.trim());
+	const isBlank = $derived(isBlankScene(scene));
 
 	onMount(() => {
 		// 保存しておいた内容を読み込む
 		try {
+			templates = mergeTemplates(JSON.parse(localStorage.getItem(TEMPLATES_KEY) ?? 'null'));
+		} catch {
+			// 壊れた保存データは無視して、最初の型から始める
+		}
+		try {
 			const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Partial<Saved> | null;
 			if (saved) {
-				title = saved.title ?? '';
-				subtitle = saved.subtitle ?? '';
-				lyricsTitle = saved.lyricsTitle ?? '';
-				lyricsText = saved.lyricsText ?? '';
+				fields = typeof saved.fields === 'object' && saved.fields ? saved.fields : {};
+				if (typeof saved.fieldTemplate === 'string' && templates.some((t) => t.id === saved.fieldTemplate)) {
+					fieldTemplate = saved.fieldTemplate;
+				}
 				entries = Array.isArray(saved.entries) ? saved.entries : [];
-				editingLyrics = !lyricsText.trim();
+				script = typeof saved.script === 'string' ? saved.script : '';
+				// 前の版の入力を引き継ぐ
+				if (saved.title || saved.subtitle) {
+					fields[TITLE_TEMPLATE] ??= { main: saved.title ?? '', sub: saved.subtitle ?? '' };
+				}
+				if (!script && saved.lyricsText) {
+					script = (saved.lyricsTitle ? `# ${saved.lyricsTitle}\n\n` : '') + saved.lyricsText;
+				}
 			}
 		} catch {
 			// 壊れた保存データは無視して、空の状態から始める
 		}
 		loaded = true;
 
-		// 文字を描くキャンバスを用意し、それを映像として送り出す
+		// 確認用の映像（ホストとスイッチャーの画面に並ぶ小さな映像）を、キャンバスから作る。
+		// モニターには映像を送らず、文字のデータを送って、モニターが自分で描く。
 		const canvas = document.createElement('canvas');
-		canvas.width = CAPTION_WIDTH;
-		canvas.height = CAPTION_HEIGHT;
+		canvas.width = TELOP_WIDTH;
+		canvas.height = TELOP_HEIGHT;
 		context = canvas.getContext('2d');
-		if (context) drawCaption(context, shown);
+		paint();
 
-		const captured = canvas.captureStream(CAPTION_FRAME_RATE);
+		const captured = canvas.captureStream(TELOP_FRAME_RATE);
 		captured.getVideoTracks()[0].contentHint = 'detail';
 		stream = captured;
 		void session.media.setLocalStream(captured);
@@ -107,9 +134,7 @@
 
 		// キャンバスは描き直したときしか新しいコマを出さない。
 		// あとからつながった相手にも絵が届くよう、同じ内容を定期的に描き直す。
-		const timer = setInterval(() => {
-			if (context) drawCaption(context, shown);
-		}, 500);
+		const timer = setInterval(paint, 500);
 
 		return () => {
 			clearInterval(timer);
@@ -117,15 +142,18 @@
 		};
 	});
 
-	// 出す内容が変わったら、すぐ描き直す
-	$effect(() => {
-		const caption = { title: shown.title, subtitle: shown.subtitle };
-		if (context) drawCaption(context, caption);
-	});
+	function paint() {
+		if (context) drawTelop(context, scene, { width: TELOP_WIDTH, height: TELOP_HEIGHT });
+	}
 
 	// 入力した内容を端末に保存する
 	$effect(() => {
-		const data: Saved = { title, subtitle, lyricsTitle, lyricsText, entries: $state.snapshot(entries) };
+		const data: Saved = {
+			script,
+			fieldTemplate,
+			fields: $state.snapshot(fields),
+			entries: $state.snapshot(entries)
+		};
 		if (!loaded) return;
 		try {
 			localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -134,32 +162,70 @@
 		}
 	});
 
-	function show(caption: Caption) {
-		shown = caption;
+	// 型を調整したら保存し、いま出している内容にもすぐ反映する
+	$effect(() => {
+		const list = $state.snapshot(templates) as TelopTemplate[];
+		if (!loaded) return;
+		try {
+			localStorage.setItem(TEMPLATES_KEY, JSON.stringify(list));
+		} catch {
+			// 保存できない環境では、覚えないだけ
+		}
+		const current = untrack(() => scene);
+		if (!current) return;
+		const updated = list.find((t) => t.id === current.template.id);
+		if (updated && JSON.stringify(updated) !== JSON.stringify(current.template)) {
+			show({ template: updated, texts: current.texts });
+		}
+	});
+
+	/** 内容を出す（モニター・ホスト・スイッチャーに届く） */
+	function show(next: TelopScene) {
+		scene = next;
+		session.setTelop(next);
+		paint();
 	}
 
 	function clear() {
-		shown = { title: '', subtitle: '' };
-		lyricIndex = -1;
+		if (scene) show({ template: scene.template, texts: {} });
 	}
 
-	function showTitle() {
-		lyricIndex = -1;
-		show({ title, subtitle });
+	function templateById(id: string): TelopTemplate {
+		const found = templates.find((t) => t.id === id) ?? templates[0];
+		return $state.snapshot(found) as TelopTemplate;
 	}
 
-	function showLyric(index: number) {
-		if (index < 0 || index >= lyrics.length) return;
-		lyricIndex = index;
-		show({ title: lyrics[index], subtitle: '' });
-		// 出している行が見えるように、一覧をスクロールする
-		document.getElementById(`lyric-${index}`)?.scrollIntoView({ block: 'nearest' });
+	// ---- 文字を出す ----
+
+	function fieldValue(frameId: string): string {
+		return fields[fieldTemplate]?.[frameId] ?? '';
 	}
 
-	function showLyricsTitle() {
-		lyricIndex = -1;
-		show({ title: lyricsTitle, subtitle: '' });
+	function setField(frameId: string, value: string) {
+		fields[fieldTemplate] ??= {};
+		fields[fieldTemplate][frameId] = value;
 	}
+
+	const fieldsFilled = $derived(fieldTarget.frames.some((f) => fieldValue(f.id).trim()));
+
+	function showFields() {
+		const template = templateById(fieldTemplate);
+		const texts: Record<string, TelopText> = {};
+		for (const f of template.frames) {
+			const text = parseField(fieldValue(f.id));
+			if (!isBlankText(text)) texts[f.id] = text;
+		}
+		currentEntryId = null;
+		show({ template, texts });
+	}
+
+	// ---- 歌詞 ----
+
+	function showTitle(title: string) {
+		show({ template: templateById(TITLE_TEMPLATE), texts: { main: parseField(title) } });
+	}
+
+	// ---- タイムテーブル ----
 
 	function addEntry() {
 		entries.push({ id: crypto.randomUUID(), time: '', title: '', subtitle: '' });
@@ -178,9 +244,13 @@
 	}
 
 	function showEntry(entry: Entry) {
-		lyricIndex = -1;
 		currentEntryId = entry.id;
-		show({ title: entry.title, subtitle: entry.subtitle });
+		const texts: Record<string, TelopText> = {};
+		const main = parseField(entry.title);
+		const sub = parseField(entry.subtitle);
+		if (!isBlankText(main)) texts.main = main;
+		if (!isBlankText(sub)) texts.sub = sub;
+		show({ template: templateById(TITLE_TEMPLATE), texts });
 	}
 
 	function showNextEntry() {
@@ -189,30 +259,17 @@
 		if (next) showEntry(next);
 	}
 
-	/** キーボードで歌詞を送る（↓・スペース: 次の行 / ↑: 前の行 / Esc: 消す） */
-	function onKeydown(event: KeyboardEvent) {
-		if (!session.connected || tab !== 'lyrics' || editingLyrics) return;
-		if (event.ctrlKey || event.metaKey || event.altKey) return;
-		const element = event.target as HTMLElement | null;
-		if (element?.closest('input, textarea, select')) return;
-
-		if (event.key === 'ArrowDown' || event.key === ' ') {
-			event.preventDefault();
-			showLyric(Math.min(lyricIndex + 1, lyrics.length - 1));
-		} else if (event.key === 'ArrowUp') {
-			event.preventDefault();
-			showLyric(Math.max(lyricIndex - 1, 0));
-		} else if (event.key === 'Escape') {
-			clear();
-		}
-	}
+	const TABS = [
+		{ id: 'text', label: '文字を出す' },
+		{ id: 'lyrics', label: '歌詞' },
+		{ id: 'timetable', label: 'タイムテーブル' },
+		{ id: 'templates', label: '型の調整' }
+	] as const;
 </script>
 
 <svelte:head>
 	<title>テロップ — CHARM Point</title>
 </svelte:head>
-
-<svelte:window onkeydown={onKeydown} />
 
 <NodeShell {session} {role}>
 	<div class="grid grid-cols-1 gap-4 lg:grid-cols-5">
@@ -220,10 +277,13 @@
 		<div class="space-y-4 lg:col-span-2">
 			<section class="panel">
 				<TallyBanner {tally} nodes={session.snapshot.nodes} />
-				<VideoView {stream} fit="contain" class="aspect-video w-full" />
+				<div class="aspect-video w-full bg-black">
+					<TelopLayer {scene} class="h-full w-full" />
+				</div>
 				<div class="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800 px-4 py-3">
 					<span class="text-sm text-zinc-300">
-						{isBlank ? 'いまは何も出していません（黒い画面）' : '↑ いま出している内容'}
+						{isBlank ? 'いまは何も出していません' : '↑ いま出している内容'}
+						{#if scene}<span class="hint">（型: {scene.template.name}）</span>{/if}
 					</span>
 					<button type="button" class="btn" disabled={isBlank} onclick={clear}>文字を消す</button>
 				</div>
@@ -231,7 +291,7 @@
 
 			<section class="panel space-y-3 p-4">
 				<p class="hint">
-					テロップは「文字のカメラ」です。ここで出した文字は、スイッチャーでこのテロップを選んだモニターに映ります。
+					テロップは「文字のカメラ」です。ここで出した文字は、スイッチャーでこのテロップを選んだモニターに映ります。「テロップを重ねる」を選ぶと、カメラの映像の上に文字だけが重なります。
 				</p>
 				<NameEditor
 					name={session.name}
@@ -252,8 +312,8 @@
 
 		<!-- 内容を作る -->
 		<section class="panel lg:col-span-3">
-			<div class="grid grid-cols-3 gap-px border-b border-zinc-800 bg-zinc-800" role="tablist">
-				{#each [{ id: 'title', label: 'タイトル' }, { id: 'lyrics', label: '歌詞' }, { id: 'timetable', label: 'タイムテーブル' }] as const as item (item.id)}
+			<div class="grid grid-cols-2 gap-px border-b border-zinc-800 bg-zinc-800 sm:grid-cols-4" role="tablist">
+				{#each TABS as item (item.id)}
 					<button
 						type="button"
 						role="tab"
@@ -268,99 +328,46 @@
 				{/each}
 			</div>
 
-			{#if tab === 'title'}
+			{#if tab === 'text'}
 				<form
 					class="space-y-4 p-4"
 					onsubmit={(event) => {
 						event.preventDefault();
-						showTitle();
+						showFields();
 					}}
 				>
 					<label class="block">
-						<span class="text-sm text-zinc-300">大きく出す文字（演目名など）</span>
-						<textarea class="field mt-1" rows="2" bind:value={title} placeholder="例: 3年A組 合唱"></textarea>
+						<span class="text-sm text-zinc-300">型</span>
+						<select class="field mt-1" bind:value={fieldTemplate}>
+							{#each templates as item (item.id)}
+								<option value={item.id}>{item.name}</option>
+							{/each}
+						</select>
 					</label>
-					<label class="block">
-						<span class="text-sm text-zinc-300">小さく出す文字（出演者や曲名など・なくてもよい）</span>
-						<input class="field mt-1" bind:value={subtitle} placeholder="例: 「旅立ちの日に」" />
-					</label>
-					<button type="submit" class="btn btn-primary" disabled={!title.trim() && !subtitle.trim()}>
-						この文字を出す
-					</button>
-				</form>
-			{:else if tab === 'lyrics'}
-				<div class="space-y-4 p-4">
-					<div class="flex flex-wrap items-end gap-2">
-						<label class="min-w-40 flex-1">
-							<span class="text-sm text-zinc-300">曲名（なくてもよい）</span>
-							<input class="field mt-1" bind:value={lyricsTitle} placeholder="例: 旅立ちの日に" />
-						</label>
-						<button type="button" class="btn" disabled={!lyricsTitle.trim()} onclick={showLyricsTitle}>
-							曲名を出す
-						</button>
-					</div>
-
-					{#if editingLyrics}
+					{#each fieldTarget.frames as f (f.id)}
 						<label class="block">
-							<span class="text-sm text-zinc-300">
-								歌詞を貼り付けてください。1行が1画面になります（空の行は「何も出さない」になります）
-							</span>
+							<span class="text-sm text-zinc-300">{f.name}</span>
 							<textarea
-								class="field mt-1 leading-relaxed"
-								rows="12"
-								bind:value={lyricsText}
-								placeholder={'白い光の中に\n山なみは萌えて\n\n遥かな空の果てまでも'}
+								class="field mt-1"
+								rows="2"
+								value={fieldValue(f.id)}
+								oninput={(event) => setField(f.id, event.currentTarget.value)}
 							></textarea>
 						</label>
-						<button
-							type="button"
-							class="btn btn-primary"
-							disabled={lyrics.length === 0}
-							onclick={() => (editingLyrics = false)}
-						>
-							歌詞を決定して、送り出しへ進む
-						</button>
-					{:else}
-						<div class="flex flex-wrap items-center gap-2">
-							<button
-								type="button"
-								class="btn btn-primary min-h-14 px-6 text-lg font-bold"
-								disabled={lyricIndex >= lyrics.length - 1}
-								onclick={() => showLyric(lyricIndex + 1)}
-							>
-								{lyricIndex < 0 ? '最初の行を出す' : '次の行へ'}
-							</button>
-							<button type="button" class="btn" disabled={lyricIndex <= 0} onclick={() => showLyric(lyricIndex - 1)}>
-								前の行へ
-							</button>
-							<button type="button" class="btn ml-auto" onclick={() => (editingLyrics = true)}>
-								歌詞を編集する
-							</button>
-						</div>
-						<p class="hint">
-							キーボードでも送れます（↓ またはスペース: 次の行 / ↑: 前の行 / Esc: 消す）。行を押すと、その行を出します。
-						</p>
-						<ol class="max-h-96 overflow-y-auto border border-zinc-800">
-							{#each lyrics as line, index (index)}
-								<li id="lyric-{index}">
-									<button
-										type="button"
-										class="flex w-full cursor-pointer items-baseline gap-3 border-b border-zinc-800 px-3 py-2 text-left text-base transition-colors {index === lyricIndex
-											? 'bg-red-600 font-semibold text-white'
-											: index === lyricIndex + 1
-												? 'bg-emerald-950 text-emerald-100 hover:bg-emerald-900'
-												: 'bg-zinc-950 text-zinc-200 hover:bg-zinc-800'}"
-										onclick={() => showLyric(index)}
-									>
-										<span class="w-8 shrink-0 text-right font-mono text-xs opacity-60">{index + 1}</span>
-										<span class={line ? '' : 'opacity-50'}>{line || '（何も出さない）'}</span>
-									</button>
-								</li>
-							{/each}
-						</ol>
-					{/if}
-				</div>
-			{:else}
+					{/each}
+					<p class="hint">空の枠は出しません。Markdown の飾り（**強調**、{'{漢字|かんじ}'} のルビ など）も使えます。</p>
+					<button type="submit" class="btn btn-primary" disabled={!fieldsFilled}>この文字を出す</button>
+				</form>
+			{:else if tab === 'lyrics'}
+				<LyricsPanel
+					bind:script
+					{templates}
+					active={session.connected}
+					onShow={show}
+					onShowTitle={showTitle}
+					onClear={clear}
+				/>
+			{:else if tab === 'timetable'}
 				<div class="space-y-3 p-4">
 					<div class="flex flex-wrap items-center gap-2">
 						<button
@@ -379,7 +386,7 @@
 
 					{#if entries.length === 0}
 						<p class="hint border border-dashed border-zinc-700 p-6 text-center">
-							演目を順番に登録しておくと、本番ではボタンひとつでタイトルを出せます。
+							演目を順番に登録しておくと、本番ではボタンひとつで「演目タイトル」の型で出せます。
 						</p>
 					{:else}
 						<ol class="space-y-2">
@@ -452,6 +459,8 @@
 						<p class="hint">時刻は進行の目安として、この画面にだけ表示されます（モニターには出ません）。</p>
 					{/if}
 				</div>
+			{:else}
+				<TemplateEditor bind:templates {scene} />
 			{/if}
 		</section>
 	</div>

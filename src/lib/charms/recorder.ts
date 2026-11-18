@@ -195,6 +195,8 @@ export function formatBytes(bytes: number): string {
  * モニターでは切り替えのたびに映像の送り元が変わる。そのまま録画すると切り替えで録画が
  * 途切れてしまうので、「いま画面に出ている映像」をキャンバスに描き写し続け、それを録画する。
  * 音声も同じように、いま出ている映像の音だけをつなぎ替える。
+ *
+ * テロップは、モニターが描いているキャンバスをそのまま描き写す（重ねるときは背景が透ける）。
  */
 export class ProgramMixer {
 	/** 録画に渡す、まとめた映像 */
@@ -205,8 +207,8 @@ export class ProgramMixer {
 	readonly #audio: AudioContext;
 	readonly #destination: MediaStreamAudioDestinationNode;
 	readonly #timer: ReturnType<typeof setInterval>;
-	#video: HTMLVideoElement | null = null;
-	#secondary: HTMLVideoElement | null = null;
+	#video: Drawable | null = null;
+	#secondary: Drawable | null = null;
 	#layout: Layout = 'single';
 	#source: MediaStreamAudioSourceNode | null = null;
 	#sourceStream: MediaStream | null = null;
@@ -227,7 +229,7 @@ export class ProgramMixer {
 	}
 
 	/** いま画面に出している映像を指定する（何も出していないときは null） */
-	setProgram(video: HTMLVideoElement | null, stream: MediaStream | null): void {
+	setProgram(video: Drawable | null, stream: MediaStream | null): void {
 		this.#video = video;
 		if (stream === this.#sourceStream) return;
 
@@ -243,10 +245,10 @@ export class ProgramMixer {
 	/**
 	 * 重ねて（並べて）出している、もう1つの映像を指定する
 	 *
-	 * @param video もう1つの映像（出していないときは null）
+	 * @param video もう1つの映像、またはテロップのキャンバス（出していないときは null）
 	 * @param layout 画面の作り方
 	 */
-	setSecondary(video: HTMLVideoElement | null, layout: Layout): void {
+	setSecondary(video: Drawable | null, layout: Layout): void {
 		this.#secondary = video;
 		this.#layout = video ? layout : 'single';
 	}
@@ -292,8 +294,9 @@ export class ProgramMixer {
 
 			case 'overlay':
 				this.#contain(main, 0, 0, width, height);
-				// 黒い部分を透かして、明るい文字だけを重ねる
-				context.globalCompositeOperation = 'screen';
+				// テロップは背景が透けているので、そのまま重ねる。
+				// カメラなどの映像は、黒い部分を透かして、明るい部分だけを重ねる
+				if (!(sub instanceof HTMLCanvasElement)) context.globalCompositeOperation = 'screen';
 				this.#contain(sub, 0, 0, width, height);
 				context.globalCompositeOperation = 'source-over';
 				break;
@@ -304,25 +307,27 @@ export class ProgramMixer {
 	}
 
 	/** 映像の縦横比を保ったまま、枠の中に全体が収まるように描く（余白は黒） */
-	#contain(video: HTMLVideoElement | null, x: number, y: number, width: number, height: number): boolean {
-		if (!video || video.videoWidth === 0 || video.videoHeight === 0) return false;
-		const scale = Math.min(width / video.videoWidth, height / video.videoHeight);
-		const w = video.videoWidth * scale;
-		const h = video.videoHeight * scale;
+	#contain(video: Drawable | null, x: number, y: number, width: number, height: number): boolean {
+		const source = sizeOf(video);
+		if (!video || !source) return false;
+		const scale = Math.min(width / source.width, height / source.height);
+		const w = source.width * scale;
+		const h = source.height * scale;
 		this.#context.drawImage(video, x + (width - w) / 2, y + (height - h) / 2, w, h);
 		return true;
 	}
 
 	/** 映像の縦横比を保ったまま、枠を埋めるように描く（はみ出す部分は切る） */
-	#cover(video: HTMLVideoElement | null, x: number, y: number, width: number, height: number): boolean {
-		if (!video || video.videoWidth === 0 || video.videoHeight === 0) return false;
-		const scale = Math.max(width / video.videoWidth, height / video.videoHeight);
+	#cover(video: Drawable | null, x: number, y: number, width: number, height: number): boolean {
+		const source = sizeOf(video);
+		if (!video || !source) return false;
+		const scale = Math.max(width / source.width, height / source.height);
 		const sw = width / scale;
 		const sh = height / scale;
 		this.#context.drawImage(
 			video,
-			(video.videoWidth - sw) / 2,
-			(video.videoHeight - sh) / 2,
+			(source.width - sw) / 2,
+			(source.height - sh) / 2,
 			sw,
 			sh,
 			x,
@@ -332,4 +337,15 @@ export class ProgramMixer {
 		);
 		return true;
 	}
+}
+
+/** 録画に描き写せるもの（受け取った映像、またはテロップのキャンバス） */
+export type Drawable = HTMLVideoElement | HTMLCanvasElement;
+
+/** 描き写すものの大きさ（まだ絵が出ていなければ null） */
+function sizeOf(source: Drawable | null): { width: number; height: number } | null {
+	if (!source) return null;
+	const width = source instanceof HTMLVideoElement ? source.videoWidth : source.width;
+	const height = source instanceof HTMLVideoElement ? source.videoHeight : source.height;
+	return width > 0 && height > 0 ? { width, height } : null;
 }

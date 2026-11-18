@@ -35,10 +35,12 @@ describe('画面の合成（ワイプ・2画面・テロップ重ね）', () => 
 		expect(applyLayout(overlay, 'all', 'single', null)).toEqual(routes);
 	});
 
-	it('重ねる映像にも、モニターへの映像接続を張る', () => {
-		const next = applyLayout(routes, ['mon1'], 'overlay', 'adm1');
+	it('重ねる映像にも、モニターへの映像接続を張る（テロップはモニターが描くので張らない）', () => {
+		const next = applyLayout(routes, ['mon1'], 'pip', 'cam2');
 		const toMon1 = desiredLinks(nodes, next).filter((link) => link.sinkId === 'mon1');
-		expect(toMon1.map((link) => link.sourceId).sort()).toEqual(['adm1', 'cam1']);
+		expect(toMon1.map((link) => link.sourceId).sort()).toEqual(['cam1', 'cam2']);
+		const overlay = applyLayout(routes, ['mon1'], 'overlay', 'adm1');
+		expect(desiredLinks(nodes, overlay).filter((link) => link.sinkId === 'mon1').map((link) => link.sourceId)).toEqual(['cam1']);
 		expect(toMon1.every((link) => link.profile === 'program')).toBe(true);
 		// 1画面のモニターには、本番の映像だけ
 		expect(desiredLinks(nodes, next).filter((link) => link.sinkId === 'mon2')).toHaveLength(1);

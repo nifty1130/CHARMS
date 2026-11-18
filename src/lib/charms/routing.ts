@@ -41,13 +41,15 @@ export function secondaryOf(route: Route | undefined): string | null {
  * いま必要な映像接続をすべて挙げる
  *
  * - 映像を出せる状態のカメラ・テロップ → ホストと全スイッチャー（確認用の小さな映像）
- * - 各モニターの本番・予告に選ばれた入力、重ねる映像 → そのモニター（本番用の映像）
+ * - 各モニターの本番・予告に選ばれたカメラ、重ねるカメラ → そのモニター（本番用の映像）。
+ *   テロップはモニターが自分で描く（文字のデータはホストが配る）ので、モニターには映像を送らない
  * - インカムで話しているスイッチャー → 聞く設定にしているカメラ（声だけ）
  */
 export function desiredLinks(nodes: NodeInfo[], routes: Route[]): DesiredLink[] {
 	const live = new Set(nodes.filter((n) => isSourceRole(n.role) && n.live).map((n) => n.id));
 	const controllers = nodes.filter((n) => n.role === 'controller');
 	const monitors = new Set(nodes.filter((n) => n.role === 'monitor').map((n) => n.id));
+	const texts = new Set(nodes.filter((n) => n.role === 'admin').map((n) => n.id));
 
 	const links: DesiredLink[] = [];
 	for (const sourceId of live) {
@@ -59,7 +61,7 @@ export function desiredLinks(nodes: NodeInfo[], routes: Route[]): DesiredLink[] 
 	for (const route of routes) {
 		if (!monitors.has(route.monitorId)) continue;
 		for (const sourceId of new Set([route.program, route.preview, secondaryOf(route)])) {
-			if (sourceId && live.has(sourceId)) {
+			if (sourceId && live.has(sourceId) && !texts.has(sourceId)) {
 				links.push({ sourceId, sinkId: route.monitorId, profile: 'program' });
 			}
 		}

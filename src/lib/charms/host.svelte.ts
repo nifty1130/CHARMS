@@ -67,6 +67,7 @@ import {
 	syncRoutes
 } from './routing';
 import type { SwitcherApi } from './switcher-api';
+import { sanitizeScene, type TelopScene } from './telop';
 
 const NODE_ROLES: NodeRole[] = ['camera', 'admin', 'monitor', 'controller'];
 
@@ -194,6 +195,8 @@ export class HostSession implements SwitcherApi {
 	readonly #timers = new Set<ReturnType<typeof setTimeout>>();
 	/** 切り替えの直後で、まだ切らずに残している接続 */
 	readonly #lingering = new Map<string, ReturnType<typeof setTimeout>>();
+	/** テロップごとの、いま出している内容 */
+	readonly #telops = new Map<string, TelopScene>();
 	/** 映したい内容（いまいない端末の分も含む。戻ってきたときに元に戻すため） */
 	#routes: Route[] = [];
 	#settings: SessionSettings = { allowRecording: false, allowRelay: false };
@@ -576,6 +579,10 @@ export class HostSession implements SwitcherApi {
 				if (entry.info.role === 'controller') this.recordAll(message.on === true);
 				break;
 
+			case 'telop':
+				if (entry.info.role === 'admin') this.#setTelop(id, sanitizeScene(message.scene));
+				break;
+
 			case 'signal':
 				// 実際に張ろうとしている接続の打ち合わせだけを取り次ぐ
 				if (
@@ -623,6 +630,7 @@ export class HostSession implements SwitcherApi {
 		this.#nodes.set(info.id, { info, pairing, token });
 
 		pairing.send({ type: 'registered', id: info.id, name: info.name, token } satisfies HostMessage);
+		pairing.send({ type: 'telops', telops: Object.fromEntries(this.#telops) } satisfies HostMessage);
 		this.#log(returning ? `${info.name} がつなぎ直しました` : `${info.name} がつながりました`);
 		this.#publish();
 	}
@@ -665,6 +673,8 @@ export class HostSession implements SwitcherApi {
 		if (!entry) return;
 		const { id, name } = entry.info;
 		this.#nodes.delete(id);
+		// テロップの内容は、つなぎ直したときにテロップ端末が送り直す
+		if (this.#telops.has(id)) this.#setTelop(id, null);
 
 		if (!this.#removing.delete(id)) {
 			// 戻ってきたときに同じ端末として扱えるよう、覚えておく
@@ -689,6 +699,14 @@ export class HostSession implements SwitcherApi {
 			if (entry.pairing === pairing) return entry;
 		}
 		return undefined;
+	}
+
+	/** テロップの内容を覚えて、全端末に配る */
+	#setTelop(sourceId: string, scene: TelopScene | null): void {
+		if (scene) this.#telops.set(sourceId, scene);
+		else this.#telops.delete(sourceId);
+		const message = JSON.stringify({ type: 'telop', sourceId, scene } satisfies HostMessage);
+		for (const other of this.#nodes.values()) other.pairing.link.send(message);
 	}
 
 	// ---- 状況の配布と、映像接続の調整 ----

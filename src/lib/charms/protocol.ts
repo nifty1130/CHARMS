@@ -5,6 +5,8 @@
  * JSON でやり取りする。映像は端末同士が直接送り合う（ホストは取り次ぎだけ）。
  */
 
+import type { TelopScene } from './telop';
+
 /** ホスト以外の役割 */
 export type NodeRole = 'camera' | 'admin' | 'monitor' | 'controller';
 
@@ -43,7 +45,8 @@ export type LinkProfile = 'thumbnail' | 'program' | 'talk';
  * - `single`: 1つの映像を画面いっぱいに映す
  * - `pip`: 本番の映像の隅に、もう1つの映像を小さく重ねる（ワイプ）
  * - `split`: 2つの映像を左右に並べる
- * - `overlay`: 本番の映像の上に、もう1つの映像の明るい部分だけを重ねる（テロップ用。黒い部分は透ける）
+ * - `overlay`: 本番の映像の上に、もう1つの映像を重ねる。テロップなら背景が透けて文字と帯だけが、
+ *   カメラなどの映像なら明るい部分だけが重なる
  */
 export type Layout = 'single' | 'pip' | 'split' | 'overlay';
 
@@ -218,7 +221,9 @@ export type ClientMessage =
 	| { type: 'camera_control'; targetId: string; command: CameraCommand }
 	| { type: 'monitor_control'; targetId: string; command: MonitorCommand }
 	| { type: 'cue'; targets: CueTarget; text: string }
-	| { type: 'record_all'; on: boolean };
+	| { type: 'record_all'; on: boolean }
+	/** テロップに出している内容（テロップのみ。何も出さないときは null） */
+	| { type: 'telop'; scene: TelopScene | null };
 
 /** ホスト → 端末 */
 export type HostMessage =
@@ -230,7 +235,11 @@ export type HostMessage =
 	| { type: 'signal'; fromId: string; description: RTCSessionDescriptionInit }
 	| { type: 'camera_control'; command: CameraCommand }
 	| { type: 'monitor_control'; command: MonitorCommand }
-	| { type: 'cue'; from: string; text: string };
+	| { type: 'cue'; from: string; text: string }
+	/** テロップ1台の内容が変わった（null: 何も出していない） */
+	| { type: 'telop'; sourceId: string; scene: TelopScene | null }
+	/** いまの全テロップの内容（つながった直後に送る） */
+	| { type: 'telops'; telops: Record<string, TelopScene> };
 
 /** 役割ごとの ID の頭文字と、名前の初期値 */
 export const ROLE_DEFAULTS: Record<NodeRole, { prefix: string; label: string }> = {
