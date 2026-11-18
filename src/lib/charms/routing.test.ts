@@ -47,13 +47,13 @@ describe('desiredLinks', () => {
 		expect(links.every((l) => l.profile === 'thumbnail')).toBe(true);
 	});
 
-	it('本番と予告に選ばれた入力は、そのモニターに本番用映像を送る', () => {
+	it('本番と予告に選ばれたカメラは、そのモニターに本番用映像を送る（テロップはモニターが描くので送らない）', () => {
 		const routes: Route[] = [
 			{ monitorId: 'mon1', program: 'cam1', preview: 'cam2' },
 			{ monitorId: 'mon2', program: 'adm1', preview: null }
 		];
 		const program = desiredLinks(nodes, routes).filter((l) => l.profile === 'program');
-		expect(keys(program)).toEqual(['adm1>mon2', 'cam1>mon1', 'cam2>mon1']);
+		expect(keys(program)).toEqual(['cam1>mon1', 'cam2>mon1']);
 	});
 
 	it('映像を出していない入力や、いないモニターへの接続は作らない', () => {

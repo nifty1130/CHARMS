@@ -38,6 +38,7 @@ import {
 import { normalizeRoomCode, RoomSocket, type RoomMessage } from './room';
 import { StatsWatcher, summarizeNet, type LinkStats } from './stats';
 import type { SwitcherApi } from './switcher-api';
+import { sanitizeScene, type TelopScene } from './telop';
 
 /** ホストに知らせる、自分の端末の状態 */
 export interface NodeStatus {
@@ -159,6 +160,8 @@ export class ClientSession implements SwitcherApi {
 	cue = $state.raw<Cue | null>(null);
 	/** 映像接続ごとの通信の状態（2秒ごとに更新） */
 	linkStats = $state.raw<LinkStats[]>([]);
+	/** テロップごとの、いま出している内容（送り元の ID ごと） */
+	telops = $state.raw<Record<string, TelopScene>>({});
 
 	/** スイッチャーから遠隔操作されたとき（カメラ・テロップ用） */
 	onCameraCommand: ((command: CameraCommand) => void) | null = null;
@@ -167,6 +170,8 @@ export class ClientSession implements SwitcherApi {
 
 	readonly media: MediaLinks;
 	#status: NodeStatus = {};
+	/** この端末（テロップ）が出している内容。つなぎ直したときに送り直す */
+	#telop: TelopScene | null = null;
 	#destroyed = false;
 	#resume: ResumeInfo | null = null;
 	#socket: RoomSocket | null = null;
@@ -333,6 +338,12 @@ export class ClientSession implements SwitcherApi {
 		this.#send({ type: 'status', ...status });
 	}
 
+	/** テロップに出している内容をホストに知らせる（テロップ用） */
+	setTelop(scene: TelopScene | null): void {
+		this.#telop = scene;
+		this.#send({ type: 'telop', scene });
+	}
+
 	/** ホストとつなぐ手続きを最初からやり直す */
 	restartPairing(): void {
 		const previous = this.pairing;
@@ -405,7 +416,28 @@ export class ClientSession implements SwitcherApi {
 				if (Object.keys(this.#status).length > 0) {
 					this.#send({ type: 'status', ...this.#status });
 				}
+				if (this.#telop) this.#send({ type: 'telop', scene: this.#telop });
 				break;
+
+			case 'telops': {
+				const telops: Record<string, TelopScene> = {};
+				if (typeof message.telops === 'object' && message.telops !== null) {
+					for (const [id, value] of Object.entries(message.telops)) {
+						const scene = sanitizeScene(value);
+						if (scene) telops[id] = scene;
+					}
+				}
+				this.telops = telops;
+				break;
+			}
+
+			case 'telop': {
+				if (typeof message.sourceId !== 'string') break;
+				const { [message.sourceId]: _previous, ...rest } = this.telops;
+				const scene = sanitizeScene(message.scene);
+				this.telops = scene ? { ...rest, [message.sourceId]: scene } : rest;
+				break;
+			}
 
 			case 'snapshot': {
 				this.snapshot = message.snapshot;

@@ -2,6 +2,7 @@
 	import {
 		formatBytes,
 		formatDuration,
+		NO_DATA_MESSAGE,
 		pickRecordingFormat,
 		startRecording,
 		type Recording
@@ -9,19 +10,21 @@
 	import { onDestroy } from 'svelte';
 
 	interface Props {
-		/** 録画する映像を返す（録画を始める瞬間に呼ばれる） */
-		getStream: () => MediaStream | null;
+		/** 録画する映像を返す（録画を始める瞬間に呼ばれる。準備に時間がかかるときは Promise で返す） */
+		getStream: () => MediaStream | null | Promise<MediaStream | null>;
 		/** ファイル名に付ける名前 */
 		label: string;
 		/** 何を録画するのかの説明（「このカメラの映像」など） */
 		description: string;
+		/** 録画中に知らせておきたいこと（音なしで録画している、など） */
+		notice?: string | null;
 		/** 録画の開始・終了を知らせる */
 		onChange?: (recording: boolean) => void;
 		/** 録画を止めたあとの後片付け */
 		onStopped?: () => void;
 	}
 
-	let { getStream, label, description, onChange, onStopped }: Props = $props();
+	let { getStream, label, description, notice = null, onChange, onStopped }: Props = $props();
 
 	let recording = $state<Recording | null>(null);
 	let startedAt = $state(0);
@@ -40,12 +43,13 @@
 
 	async function start(remote = false) {
 		error = null;
-		const stream = getStream();
+		busy = true;
+		const stream = await getStream();
 		if (!stream) {
 			error = '録画できる映像がありません';
+			busy = false;
 			return;
 		}
-		busy = true;
 		try {
 			const started = await startRecording(stream, {
 				label,
@@ -80,7 +84,8 @@
 		const current = recording;
 		if (!current) return;
 		busy = true;
-		await current.stop();
+		const saved = await current.stop();
+		if (!saved) error = NO_DATA_MESSAGE;
 		recording = null;
 		busy = false;
 		onChange?.(false);
@@ -112,6 +117,9 @@
 			録画中 <span class="font-mono">{formatDuration(now - startedAt)}</span>
 			<span class="text-zinc-500">{formatBytes(bytes)}</span>
 		</span>
+		{#if notice}
+			<p class="w-full text-sm text-amber-200">{notice}</p>
+		{/if}
 		{#if !recording.direct}
 			<span class="hint">止めたときにダウンロードされます。長時間の録画は PC の Chrome / Edge が安全です。</span>
 		{/if}

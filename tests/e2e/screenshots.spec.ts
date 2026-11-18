@@ -79,8 +79,8 @@ test('画面写真を撮る', async ({ context }) => {
 	await rename('モニター 2', 'ロビーのテレビ');
 
 	// テロップ
-	await admin.getByLabel('大きく出す文字').fill('3年A組 合唱');
-	await admin.getByLabel('小さく出す文字').fill('「旅立ちの日に」');
+	await admin.getByLabel('演目名').fill('3年A組 合唱');
+	await admin.getByLabel('出演者').fill('「旅立ちの日に」');
 	await admin.getByRole('button', { name: 'この文字を出す' }).click();
 	await shot(admin, '07-admin-title');
 
@@ -99,18 +99,53 @@ test('画面写真を撮る', async ({ context }) => {
 
 	// テロップ（歌詞の送り出し）
 	await admin.getByRole('tab', { name: '歌詞' }).click();
-	await admin.getByLabel('曲名').fill('旅立ちの日に');
-	await admin
-		.getByLabel(/歌詞を貼り付けてください/)
-		.fill('白い光の中に\n山なみは萌えて\n遥かな空の果てまでも\n君は飛び立つ\n\n限りなく青い空に\n心ふるわせ');
-	await admin.getByRole('button', { name: '歌詞を決定して、送り出しへ進む' }).click();
-	await admin.getByRole('button', { name: '最初の行を出す' }).click();
-	await admin.getByRole('button', { name: '次の行へ' }).click();
+	await admin.getByLabel(/歌詞の台本/).fill(
+		[
+			'# 怪獣の花唄',
+			'型: 歌詞（3か所）',
+			'> 前奏なし。いきなり歌い出し',
+			'',
+			'左上: そうだ',
+			'右下: うれしいんだ',
+			'中央: 生きる**よろこび**',
+			'',
+			'- 左上: 愛と',
+			'- 右下: 勇気だけが',
+			'',
+			'中央: {友達|ともだち}さ',
+			'',
+			'---',
+			'',
+			'# 旅立ちの日に',
+			'型: 歌詞（下に1〜2行）',
+			'白い光の中に',
+			'山なみは萌えて'
+		].join('\n')
+	);
+	await shot(admin, '11-admin-script', true);
+	await admin.getByRole('button', { name: '台本を決定して、送り出しへ進む' }).click();
+	await admin.getByRole('button', { name: /^最初を出す/ }).click();
+	await admin.getByRole('button', { name: /^次へ/ }).click();
+	await admin.getByRole('button', { name: /^次へ/ }).click();
 	await shot(admin, '08-admin-lyrics');
+
+	// 型の調整
+	await admin.getByRole('tab', { name: '型の調整' }).click();
+	await shot(admin, '12-admin-templates');
+	await admin.getByRole('tab', { name: '歌詞' }).click();
 
 	// モニター（映像を表示中。操作パネルを出した状態）
 	await monitor1.mouse.move(200, 200);
 	await shot(monitor1, '09-monitor');
+
+	// モニター（カメラ映像に歌詞を重ねた状態）
+	await admin.getByRole('button', { name: '旅立ちの日に' }).click();
+	await admin.getByRole('button', { name: /^最初を出す/ }).click();
+	await controller.getByRole('button', { name: /^テロップを重ねる/ }).click();
+	await expect(monitor1.locator('canvas[data-telop="overlay"]')).toBeVisible();
+	await monitor1.mouse.move(640, 790);
+	await monitor1.waitForTimeout(4500);
+	await shot(monitor1, '13-monitor-overlay');
 
 	// ホスト（全体）
 	await expectPlayingVideos(host, 3);
