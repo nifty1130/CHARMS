@@ -199,6 +199,9 @@ export function formatBytes(bytes: number): string {
 	return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+/** 音をまとめる仕組みの時計が進んでいるかを確かめる時間 */
+const CLOCK_CHECK_MS = 300;
+
 /**
  * ProgramMixer — モニターに映している映像を、1本の映像にまとめる
  *
@@ -254,13 +257,16 @@ export class ProgramMixer {
 	 * @param timeoutMs 動き出すのを待つ時間
 	 */
 	async prepare(timeoutMs = 1500): Promise<void> {
+		const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 		if (this.#audio.state !== 'running') {
-			await Promise.race([
-				this.#audio.resume().catch(() => {}),
-				new Promise((resolve) => setTimeout(resolve, timeoutMs))
-			]);
+			await Promise.race([this.#audio.resume().catch(() => {}), wait(timeoutMs)]);
 		}
-		if (this.#audio.state !== 'running') {
+		// 「動いている」と答えても、音を出す装置がない端末では、時計が進まず音のデータが来ないことがある。
+		// 時計が実際に進むかどうかで確かめる
+		const start = this.#audio.currentTime;
+		await wait(CLOCK_CHECK_MS);
+		const advancing = this.#audio.state === 'running' && this.#audio.currentTime > start;
+		if (!advancing) {
 			for (const track of this.stream.getAudioTracks()) this.stream.removeTrack(track);
 		}
 	}
