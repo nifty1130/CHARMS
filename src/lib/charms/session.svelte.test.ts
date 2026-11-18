@@ -6,9 +6,10 @@
  * カメラはブラウザ内蔵のテスト用映像を使う。
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClientSession } from './client.svelte';
 import { HostSession } from './host.svelte';
+import { loadIceServers, resetIceServers } from './ice';
 import { LocalHostFinder } from './local-pairing.svelte';
 import type { CameraCommand, NodeRole } from './protocol';
 
@@ -232,5 +233,50 @@ describe('ホストと端末', () => {
 		expect(await finder.connect(monitor.pairing)).toBe(true);
 		await expect.poll(() => monitor.connected).toBe(true);
 		expect(monitor.lost).toBe(false);
+	});
+});
+
+describe('映像の中継（TURN）', () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		resetIceServers();
+	});
+
+	it('中継を許していないとき、同じ映像接続が2回続けて失敗したら知らせ、許すと全端末に伝わる', async () => {
+		// 配信元に TURN が設定されている状態にする（実際には使わない）
+		resetIceServers();
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () =>
+				Response.json({
+					iceServers: [
+						{ urls: ['stun:stun.example:3478'] },
+						{ urls: ['turn:turn.example:3478'], username: 'u', credential: 'c' }
+					],
+					ttl: 86400
+				})
+			)
+		);
+		await loadIceServers();
+
+		const host = createHost();
+		const camera = await join('camera');
+		const monitor = await join('monitor');
+		await goLive(camera);
+		host.route('all', 'program', 'cam1');
+		expect(host.snapshot.settings.allowRelay).toBe(false);
+		expect(host.relayAvailable).toBe(true);
+
+		// モニターから「直接つながらなかった」と2回知らせる（2回目は、ホストが張り直したあと）
+		const fail = () => monitor.pairing.send({ type: 'link_failed', sourceId: 'cam1', sinkId: 'mon1' });
+		fail();
+		await new Promise((resolve) => setTimeout(resolve, 1500));
+		fail();
+		await expect.poll(() => host.relayNeeded).toEqual([{ sourceId: 'cam1', sinkId: 'mon1' }]);
+
+		host.setAllowRelay(true);
+		expect(host.relayNeeded).toEqual([]);
+		await expect.poll(() => monitor.snapshot.settings.allowRelay).toBe(true);
+		await expect.poll(() => camera.snapshot.settings.allowRelay).toBe(true);
 	});
 });

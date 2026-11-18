@@ -3,6 +3,7 @@ import {
 	expectMonitorShowsVideo,
 	expectPlayingVideos,
 	join,
+	telopPixels,
 	openHost,
 	startCamera
 } from './helpers';
@@ -92,27 +93,31 @@ test('予告してから切り替える（2段階切替）と、全モニター�
 	await expect(monitor1.getByText('「カメラ 2」を表示中')).toBeAttached();
 });
 
-test('テロップで出した文字が、映像としてモニターに映る', async ({ context }) => {
+test('テロップで出した文字が、モニターに描かれる', async ({ context }) => {
 	const host = await openHost(context);
 	const admin = await join(context, '/admin/', 'テロップ 1');
 	const monitor = await join(context, '/monitor/', 'モニター 1');
 
-	await admin.getByLabel('大きく出す文字').fill('3年A組 合唱');
-	await admin.getByLabel('小さく出す文字').fill('旅立ちの日に');
+	await admin.getByLabel('演目名').fill('3年A組 合唱');
+	await admin.getByLabel('出演者').fill('旅立ちの日に');
 	await admin.getByRole('button', { name: 'この文字を出す' }).click();
 	await expect(admin.getByText('↑ いま出している内容')).toBeVisible();
 
+	// モニターは映像を受け取らず、届いた文字を自分で描く
 	await host.getByRole('button', { name: 'テロップ 1 を映す' }).click();
-	await expectMonitorShowsVideo(monitor);
+	await expect
+		.poll(() => telopPixels(monitor, 'full'), { timeout: 20_000 })
+		.toEqual({ text: true, clearCorner: false });
 	await expect(admin.getByText('● 本番中')).toBeVisible();
 
-	// 歌詞を登録して、1行ずつ送る
+	// 歌詞の台本を決定して、1行ずつ送る
 	await admin.getByRole('tab', { name: '歌詞' }).click();
-	await admin.getByLabel(/歌詞を貼り付けてください/).fill('白い光の中に\n山なみは萌えて');
-	await admin.getByRole('button', { name: '歌詞を決定して、送り出しへ進む' }).click();
-	await admin.getByRole('button', { name: '最初の行を出す' }).click();
+	await admin.getByLabel(/歌詞の台本/).fill('# 旅立ちの日に\n白い光の中に\n山なみは萌えて');
+	await admin.getByRole('button', { name: '台本を決定して、送り出しへ進む' }).click();
+	await admin.getByRole('button', { name: /^最初を出す/ }).click();
 	await admin.keyboard.press('ArrowDown');
-	await expect(admin.getByRole('button', { name: '次の行へ' })).toBeDisabled();
+	await expect(admin.getByRole('button', { name: /^次へ/ })).toBeDisabled();
+	await expect(admin.getByRole('button', { name: /^次へ/ })).toContainText('この曲の最後です');
 
 	// タイムテーブルに登録した演目を出す
 	await admin.getByRole('tab', { name: 'タイムテーブル' }).click();
@@ -125,7 +130,7 @@ test('テロップで出した文字が、映像としてモニターに映る',
 	admin.on('dialog', (dialog) => void dialog.accept());
 	await admin.reload();
 	await admin.getByRole('button', { name: 'この端末のホストにつなぐ' }).click();
-	await expect(admin.getByLabel('大きく出す文字')).toHaveValue('3年A組 合唱');
+	await expect(admin.getByLabel('演目名')).toHaveValue('3年A組 合唱');
 });
 
 test('カメラが使えないときは、コードを貼り付けてつなげる', async ({ context }) => {

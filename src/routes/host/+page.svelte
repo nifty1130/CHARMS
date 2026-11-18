@@ -5,6 +5,7 @@
 	import NetBadge from '../../components/NetBadge.svelte';
 	import Switcher from '../../components/Switcher.svelte';
 	import { HostSession } from '$lib/charms/host.svelte';
+	import { loadIceServers } from '$lib/charms/ice';
 	import { ROLE_DEFAULTS, type NodeInfo, type NodeRole } from '$lib/charms/protocol';
 	import { confirmBeforeLeaving, keepScreenAwake } from '$lib/charms/wake-lock';
 	import { roleOf } from '$lib/roles';
@@ -27,6 +28,18 @@
 	let adding = $state(true);
 	let renamingId = $state<string | null>(null);
 	let nameDraft = $state('');
+	/** 配信元で映像の中継（TURN）が使えるか（設定の説明を変えるため） */
+	let relayAvailable = $state(false);
+	/** 直接つながらなかった映像接続を、名前で並べたもの */
+	const relayPairs = $derived(
+		host.relayNeeded.map(({ sourceId, sinkId }) => `${nameOf(sourceId)} → ${nameOf(sinkId)}`)
+	);
+
+	function nameOf(id: string): string {
+		if (id === 'host') return 'ホスト';
+		return nodes.find((node) => node.id === id)?.name ?? id;
+	}
+
 	/** 画面の下に少しの間だけ出すお知らせ */
 	let toast = $state<string | null>(null);
 	let seenEvents = 0;
@@ -49,6 +62,7 @@
 	onMount(() => {
 		// インターネットにつながっていれば、合言葉でもつなげるようにする
 		if (host.roomPreferred) host.openRoom();
+		void loadIceServers().then(() => (relayAvailable = host.relayAvailable));
 
 		const releaseWake = keepScreenAwake();
 		// 端末がつながっている間は、うっかり閉じないよう確認を出す
@@ -131,25 +145,38 @@
 				</button>
 			</div>
 			{#if adding}
-				<div class="space-y-4">
-					<InvitePanel {host} />
+				<!-- QR コードでつなぐのが基本。合言葉は、口で伝えたり離れた端末を招いたりするときに使う -->
+				<div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
 					{#if host.invite}
 						<div>
 							<h2 class="mb-1 text-base font-semibold">
-								QR コードでつなぐ（インターネットがなくても使えます）
+								QR コードでつなぐ<span class="hint ml-2 font-normal">インターネットは不要</span>
 							</h2>
 							<p class="hint mb-3">
 								つなぎたい端末で役割を選ぶと、同じような画面が出ます。お互いの QR
-								コードを読み取り合ってください。1台つながると、続けて次の端末をつなげます。
+								コードを、CHARM Point の画面で読み取り合ってください。1台つながると、続けて次の端末をつなげます。
 							</p>
 							<ConnectPanel pairing={host.invite} side="host" onRestart={() => host.resetInvite()} />
 						</div>
 					{/if}
+					<div class="xl:pt-[3.25rem]">
+						<InvitePanel {host} />
+					</div>
 				</div>
 			{:else}
 				<p class="hint">端末を増やすときは「端末を追加する」を押してください。</p>
 			{/if}
 		</section>
+
+		{#if relayPairs.length > 0}
+			<div class="flex flex-wrap items-center gap-3 border border-amber-500/50 bg-amber-500/10 px-4 py-3" role="alert">
+				<p class="min-w-0 flex-1 text-base text-amber-100">
+					<strong class="font-semibold">直接つながらない映像があります</strong>（{relayPairs.join('、')}）。端末同士の通信を止めているネットワークや、離れた場所の端末では、中継サーバーを通すとつながります。中継した通信量に応じて、配信元に費用がかかることがあります。
+				</p>
+				<button type="button" class="btn btn-primary" onclick={() => host.setAllowRelay(true)}>中継を使う</button>
+				<button type="button" class="btn btn-quiet" onclick={() => host.dismissRelayNeeded()}>閉じる</button>
+			</div>
+		{/if}
 
 		<!-- つながっている端末 -->
 		<section class="panel">
@@ -288,6 +315,26 @@
 					<span class="text-base font-medium">録画を許可する</span>
 					<span class="hint mt-0.5 block">
 						オンにすると、カメラ・テロップ・モニターの画面に「録画を始める」ボタンが出ます。カメラでは撮ったままの映像を、モニターでは切り替え済みの映像を録画できます。録画が禁止されている催しでは、オフのままにしてください。
+					</span>
+				</span>
+			</label>
+			<label class="flex cursor-pointer items-start gap-3 border-t border-zinc-800 p-4">
+				<input
+					type="checkbox"
+					class="mt-1 size-5 accent-red-500"
+					checked={host.snapshot.settings.allowRelay}
+					disabled={!relayAvailable && !host.snapshot.settings.allowRelay}
+					onchange={(event) => host.setAllowRelay(event.currentTarget.checked)}
+				/>
+				<span>
+					<span class="text-base font-medium">映像の中継サーバーを使う</span>
+					<span class="hint mt-0.5 block">
+						{#if relayAvailable || host.snapshot.settings.allowRelay}
+							端末同士が直接つながらないとき（端末同士の通信を止めている Wi-Fi、スマホの回線と別のネットワーク など）に、インターネット上の中継サーバーを通して映像を届けます。中継した通信量に応じて配信元に費用がかかることがあるので、必要なときだけオンにしてください。同じ
+							LAN の端末同士は、オンでも直接つながります。
+						{:else}
+							いまは使えません（インターネットにつながっていないか、配信元に中継サーバーが設定されていません）。
+						{/if}
 					</span>
 				</span>
 			</label>

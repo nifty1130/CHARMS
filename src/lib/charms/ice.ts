@@ -132,3 +132,33 @@ export function resetIceServers(): void {
 	cache = null;
 	loading = null;
 }
+
+/** 中継サーバー（TURN）の URL か */
+function isRelayUrl(url: string): boolean {
+	return /^turns?:/i.test(url);
+}
+
+/**
+ * 一覧から中継サーバー（TURN）を除く（STUN だけを残す）
+ *
+ * 映像の中継は通信量に応じて費用がかかるので、ホストが許したときだけ使う。
+ */
+export function withoutRelay(servers: RTCIceServer[]): RTCIceServer[] {
+	const result: RTCIceServer[] = [];
+	for (const server of servers) {
+		const urls = (Array.isArray(server.urls) ? server.urls : [server.urls]).filter((url) => !isRelayUrl(url));
+		if (urls.length > 0) result.push({ urls });
+	}
+	return result;
+}
+
+/** 一覧に中継サーバー（TURN）が入っているか（配信元に TURN の鍵が登録されているか） */
+export function hasRelay(servers: RTCIceServer[]): boolean {
+	return servers.some((server) => (Array.isArray(server.urls) ? server.urls : [server.urls]).some(isRelayUrl));
+}
+
+/** 映像接続に使う STUN / TURN の一覧（中継を許していなければ、TURN を除く） */
+export function mediaIceServers(allowRelay: boolean): RTCIceServer[] {
+	const servers = cachedIceServers();
+	return allowRelay ? servers : withoutRelay(servers);
+}

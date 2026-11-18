@@ -57,8 +57,12 @@ export interface RecordingOptions {
 }
 
 export interface Recording {
-	/** 録画を止めて、ファイルを保存する */
-	stop(): Promise<void>;
+	/**
+	 * 録画を止めて、ファイルを保存する
+	 *
+	 * @returns 保存できたか（録画のデータが1つも取れなかったときは false）
+	 */
+	stop(): Promise<boolean>;
 	/** 保存先をあらかじめ選んで、ディスクに直接書き込んでいるか（長時間の録画に向く） */
 	readonly direct: boolean;
 }
@@ -126,20 +130,23 @@ export async function startRecording(
 		}
 	};
 
-	const finish = async () => {
+	/** @returns 保存できたか */
+	const finish = async (): Promise<boolean> => {
 		await writing;
 		if (writable) {
 			await writable.close().catch(() => {});
-		} else if (chunks.length > 0) {
-			download(new Blob(chunks, { type: format.mimeType.split(';')[0] }), fileName);
+			return bytes > 0;
 		}
+		if (chunks.length === 0) return false;
+		download(new Blob(chunks, { type: format.mimeType.split(';')[0] }), fileName);
+		return true;
 	};
 
-	const ended = new Promise<void>((resolve) => {
+	const ended = new Promise<boolean>((resolve) => {
 		recorder.onstop = () => {
-			void finish().then(() => {
-				resolve();
-				if (!stopped) options.onEnd?.();
+			void finish().then((saved) => {
+				resolve(saved);
+				if (!stopped) options.onEnd?.(saved ? undefined : new Error(NO_DATA_MESSAGE));
 			});
 		};
 	});
@@ -155,10 +162,13 @@ export async function startRecording(
 		async stop() {
 			stopped = true;
 			if (recorder.state !== 'inactive') recorder.stop();
-			await ended;
+			return ended;
 		}
 	};
 }
+
+/** 録画のデータが1つも取れなかったときの知らせ */
+export const NO_DATA_MESSAGE = '録画のデータが取れなかったため、ファイルを保存できませんでした。';
 
 /** ブラウザのダウンロードとしてファイルを保存する */
 function download(blob: Blob, fileName: string): void {
@@ -189,12 +199,17 @@ export function formatBytes(bytes: number): string {
 	return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+/** 音をまとめる仕組みの時計が進んでいるかを確かめる時間 */
+const CLOCK_CHECK_MS = 300;
+
 /**
  * ProgramMixer — モニターに映している映像を、1本の映像にまとめる
  *
  * モニターでは切り替えのたびに映像の送り元が変わる。そのまま録画すると切り替えで録画が
  * 途切れてしまうので、「いま画面に出ている映像」をキャンバスに描き写し続け、それを録画する。
  * 音声も同じように、いま出ている映像の音だけをつなぎ替える。
+ *
+ * テロップは、モニターが描いているキャンバスをそのまま描き写す（重ねるときは背景が透ける）。
  */
 export class ProgramMixer {
 	/** 録画に渡す、まとめた映像 */
@@ -205,8 +220,8 @@ export class ProgramMixer {
 	readonly #audio: AudioContext;
 	readonly #destination: MediaStreamAudioDestinationNode;
 	readonly #timer: ReturnType<typeof setInterval>;
-	#video: HTMLVideoElement | null = null;
-	#secondary: HTMLVideoElement | null = null;
+	#video: Drawable | null = null;
+	#secondary: Drawable | null = null;
 	#layout: Layout = 'single';
 	#source: MediaStreamAudioSourceNode | null = null;
 	#sourceStream: MediaStream | null = null;
@@ -226,8 +241,38 @@ export class ProgramMixer {
 		this.#timer = setInterval(() => this.#draw(), 1000 / frameRate);
 	}
 
+	/** 録画に音が入るか（prepare で、音をまとめる仕組みが動かなかったときは false） */
+	get audible(): boolean {
+		return this.stream.getAudioTracks().length > 0;
+	}
+
+	/**
+	 * 録画を始める前に呼ぶ。音をまとめる仕組み（AudioContext）が動き出すのを待ち、動かなければ
+	 * 音なしで録画する（録画する映像から、音のトラックを外す）
+	 *
+	 * ブラウザは、画面に一度も触れていないページ（招待リンクで自動でつながったモニターなど）では、
+	 * 音の仕組みを止めたままにする。そのまま録画すると、来ない音のデータを待ち続けて、
+	 * webm 形式で録画するブラウザ（Android・Linux の Chrome、Firefox）では、録画のデータが1つもできない。
+	 *
+	 * @param timeoutMs 動き出すのを待つ時間
+	 */
+	async prepare(timeoutMs = 1500): Promise<void> {
+		const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+		if (this.#audio.state !== 'running') {
+			await Promise.race([this.#audio.resume().catch(() => {}), wait(timeoutMs)]);
+		}
+		// 「動いている」と答えても、音を出す装置がない端末では、時計が進まず音のデータが来ないことがある。
+		// 時計が実際に進むかどうかで確かめる
+		const start = this.#audio.currentTime;
+		await wait(CLOCK_CHECK_MS);
+		const advancing = this.#audio.state === 'running' && this.#audio.currentTime > start;
+		if (!advancing) {
+			for (const track of this.stream.getAudioTracks()) this.stream.removeTrack(track);
+		}
+	}
+
 	/** いま画面に出している映像を指定する（何も出していないときは null） */
-	setProgram(video: HTMLVideoElement | null, stream: MediaStream | null): void {
+	setProgram(video: Drawable | null, stream: MediaStream | null): void {
 		this.#video = video;
 		if (stream === this.#sourceStream) return;
 
@@ -243,10 +288,10 @@ export class ProgramMixer {
 	/**
 	 * 重ねて（並べて）出している、もう1つの映像を指定する
 	 *
-	 * @param video もう1つの映像（出していないときは null）
+	 * @param video もう1つの映像、またはテロップのキャンバス（出していないときは null）
 	 * @param layout 画面の作り方
 	 */
-	setSecondary(video: HTMLVideoElement | null, layout: Layout): void {
+	setSecondary(video: Drawable | null, layout: Layout): void {
 		this.#secondary = video;
 		this.#layout = video ? layout : 'single';
 	}
@@ -292,8 +337,9 @@ export class ProgramMixer {
 
 			case 'overlay':
 				this.#contain(main, 0, 0, width, height);
-				// 黒い部分を透かして、明るい文字だけを重ねる
-				context.globalCompositeOperation = 'screen';
+				// テロップは背景が透けているので、そのまま重ねる。
+				// カメラなどの映像は、黒い部分を透かして、明るい部分だけを重ねる
+				if (!(sub instanceof HTMLCanvasElement)) context.globalCompositeOperation = 'screen';
 				this.#contain(sub, 0, 0, width, height);
 				context.globalCompositeOperation = 'source-over';
 				break;
@@ -304,25 +350,27 @@ export class ProgramMixer {
 	}
 
 	/** 映像の縦横比を保ったまま、枠の中に全体が収まるように描く（余白は黒） */
-	#contain(video: HTMLVideoElement | null, x: number, y: number, width: number, height: number): boolean {
-		if (!video || video.videoWidth === 0 || video.videoHeight === 0) return false;
-		const scale = Math.min(width / video.videoWidth, height / video.videoHeight);
-		const w = video.videoWidth * scale;
-		const h = video.videoHeight * scale;
+	#contain(video: Drawable | null, x: number, y: number, width: number, height: number): boolean {
+		const source = sizeOf(video);
+		if (!video || !source) return false;
+		const scale = Math.min(width / source.width, height / source.height);
+		const w = source.width * scale;
+		const h = source.height * scale;
 		this.#context.drawImage(video, x + (width - w) / 2, y + (height - h) / 2, w, h);
 		return true;
 	}
 
 	/** 映像の縦横比を保ったまま、枠を埋めるように描く（はみ出す部分は切る） */
-	#cover(video: HTMLVideoElement | null, x: number, y: number, width: number, height: number): boolean {
-		if (!video || video.videoWidth === 0 || video.videoHeight === 0) return false;
-		const scale = Math.max(width / video.videoWidth, height / video.videoHeight);
+	#cover(video: Drawable | null, x: number, y: number, width: number, height: number): boolean {
+		const source = sizeOf(video);
+		if (!video || !source) return false;
+		const scale = Math.max(width / source.width, height / source.height);
 		const sw = width / scale;
 		const sh = height / scale;
 		this.#context.drawImage(
 			video,
-			(video.videoWidth - sw) / 2,
-			(video.videoHeight - sh) / 2,
+			(source.width - sw) / 2,
+			(source.height - sh) / 2,
 			sw,
 			sh,
 			x,
@@ -332,4 +380,15 @@ export class ProgramMixer {
 		);
 		return true;
 	}
+}
+
+/** 録画に描き写せるもの（受け取った映像、またはテロップのキャンバス） */
+export type Drawable = HTMLVideoElement | HTMLCanvasElement;
+
+/** 描き写すものの大きさ（まだ絵が出ていなければ null） */
+function sizeOf(source: Drawable | null): { width: number; height: number } | null {
+	if (!source) return null;
+	const width = source instanceof HTMLVideoElement ? source.videoWidth : source.width;
+	const height = source instanceof HTMLVideoElement ? source.videoHeight : source.height;
+	return width > 0 && height > 0 ? { width, height } : null;
 }

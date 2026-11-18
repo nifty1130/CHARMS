@@ -1,13 +1,14 @@
 <script lang="ts">
 	import type { HostSession } from '$lib/charms/host.svelte';
 	import { formatRoomCode, inviteUrl } from '$lib/charms/room';
-	import QrCode from './QrCode.svelte';
 
 	/**
 	 * ホストの画面に出す、合言葉・招待リンクの案内
 	 *
-	 * インターネットにつながっているときだけ使える。つなぎたい端末は、合言葉を入力するか、
-	 * リンク（または、ふつうのカメラアプリで読める QR コード）を開くだけでつながる。
+	 * インターネットにつながっているときだけ使える。つなぎたい端末は、6桁の合言葉を入力するか、
+	 * 招待リンクを開くだけでつながる。口で伝えたり、離れた場所の端末を招いたりするときに使う。
+	 * （会場の中の端末は、QR コードの読み取り合いでつなぐのが基本。画面に QR コードを2種類出すと
+	 * 迷うので、招待リンクの QR コードは出さない）
 	 */
 	interface Props {
 		host: HostSession;
@@ -57,39 +58,31 @@
 			<button type="button" class="btn" onclick={() => host.openRoom()}>受け付けを始める</button>
 		</div>
 	{:else if room.status === 'open'}
-		<div class="grid grid-cols-1 gap-px bg-zinc-800 md:grid-cols-[1fr_auto]">
-			<div class="bg-zinc-900 p-4 sm:p-6">
-				<p class="text-sm text-zinc-400">合言葉</p>
-				<p
-					class="mt-1 font-mono text-5xl leading-none font-semibold tracking-[0.12em] text-zinc-50 sm:text-6xl"
-					data-testid="room-code"
-				>
-					{formatRoomCode(room.code)}
-				</p>
-				<ol class="mt-5 list-decimal space-y-1 pl-5 text-base leading-relaxed text-zinc-200">
-					<li>
-						つなぎたい端末で <strong class="font-semibold text-zinc-50">{siteLabel}</strong> を開く
-					</li>
-					<li>役割（カメラ・モニターなど）を選ぶ</li>
-					<li>この合言葉を入力する</li>
-				</ol>
-				<p class="hint mt-3">
-					右の QR コードをスマホのカメラアプリで読み取ると、合言葉の入力を省けます。離れた場所の端末には、リンクを送ってください。
-				</p>
-				<div class="mt-4 flex flex-wrap gap-2">
-					<button type="button" class="btn" onclick={() => copy(link, 'link')}>
-						{copied === 'link' ? 'コピーしました' : '招待リンクをコピー'}
-					</button>
-					<button type="button" class="btn btn-quiet" onclick={() => host.closeRoom()}>
-						受け付けを止める
-					</button>
-				</div>
-			</div>
-			<div class="flex items-center justify-center bg-zinc-900 p-4 sm:p-6">
-				<div class="w-40 sm:w-48">
-					<QrCode data={link} size={384} label="招待リンクの QR コード" />
-					<p class="hint mt-2 text-center text-xs">招待リンク</p>
-				</div>
+		<div class="p-4 sm:p-5">
+			<p class="text-sm text-zinc-400">6桁の合言葉</p>
+			<p
+				class="mt-1 font-mono text-5xl leading-none font-semibold tracking-[0.12em] text-zinc-50"
+				data-testid="room-code"
+			>
+				{formatRoomCode(room.code)}
+			</p>
+			<ol class="mt-4 list-decimal space-y-1 pl-5 text-sm leading-relaxed text-zinc-200">
+				<li>
+					つなぎたい端末で <strong class="font-semibold text-zinc-50">{siteLabel}</strong> を開く
+				</li>
+				<li>役割（カメラ・モニターなど）を選ぶ</li>
+				<li>この合言葉を入力する</li>
+			</ol>
+			<p class="hint mt-3">
+				口で伝えるときに便利です。離れた場所の端末には、招待リンクを送ってください（開くだけでつながります）。
+			</p>
+			<div class="mt-4 flex flex-wrap gap-2">
+				<button type="button" class="btn" onclick={() => copy(link, 'link')}>
+					{copied === 'link' ? 'コピーしました' : '招待リンクをコピー'}
+				</button>
+				<button type="button" class="btn btn-quiet" onclick={() => host.closeRoom()}>
+					受け付けを止める
+				</button>
 			</div>
 		</div>
 
@@ -142,7 +135,7 @@
 				{:else if room.status === 'refused'}
 					合言葉を使えませんでした。
 				{:else}
-					インターネットにつながっていないため、合言葉は使えません。下の QR
+					インターネットにつながっていないため、合言葉は使えません。QR
 					コードでつないでください（つながり次第、自動で使えるようになります）。
 				{/if}
 			</p>

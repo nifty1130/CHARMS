@@ -19,7 +19,7 @@
  * 状況を端末に保存しておけば（`persist`）、ホストのページを読み込み直しても続きから再開できる。
  */
 
-import { cachedIceServers } from './ice';
+import { cachedIceServers, hasRelay, mediaIceServers } from './ice';
 import { LocalHostBeacon } from './local-pairing.svelte';
 import { MediaLinks } from './media-links';
 import { Pairing } from './pairing.svelte';
@@ -67,8 +67,12 @@ import {
 	syncRoutes
 } from './routing';
 import type { SwitcherApi } from './switcher-api';
+import { sanitizeScene, type TelopScene } from './telop';
 
 const NODE_ROLES: NodeRole[] = ['camera', 'admin', 'monitor', 'controller'];
+
+/** 同じ映像接続が何回続けて失敗したら、「中継を使いますか」と知らせるか */
+const RELAY_HINT_AFTER = 2;
 
 function isZoomInfo(value: unknown): value is ZoomInfo {
 	if (typeof value !== 'object' || value === null) return false;
@@ -168,6 +172,12 @@ export class HostSession implements SwitcherApi {
 	restored = $state(false);
 	/** 合言葉での受け付けを、開いたときから始めてよいか（前回やめていたら false） */
 	roomPreferred = true;
+	/**
+	 * 直接つながらなかった映像接続（中継を許せばつながるかもしれないもの）
+	 *
+	 * 中継を許していないときに、同じ接続が2回続けて失敗したら、ここに入れて知らせる。
+	 */
+	relayNeeded = $state.raw<{ sourceId: string; sinkId: string }[]>([]);
 	/** 出来事の記録（新しいものが先頭） */
 	events = $state.raw<HostEvent[]>([]);
 
@@ -185,9 +195,11 @@ export class HostSession implements SwitcherApi {
 	readonly #timers = new Set<ReturnType<typeof setTimeout>>();
 	/** 切り替えの直後で、まだ切らずに残している接続 */
 	readonly #lingering = new Map<string, ReturnType<typeof setTimeout>>();
+	/** テロップごとの、いま出している内容 */
+	readonly #telops = new Map<string, TelopScene>();
 	/** 映したい内容（いまいない端末の分も含む。戻ってきたときに元に戻すため） */
 	#routes: Route[] = [];
-	#settings: SessionSettings = { allowRecording: false };
+	#settings: SessionSettings = { allowRecording: false, allowRelay: false };
 	#inviting = false;
 	#destroyed = false;
 
@@ -198,7 +210,7 @@ export class HostSession implements SwitcherApi {
 	#joining = 0;
 
 	readonly #media = new MediaLinks({
-		iceServers: cachedIceServers,
+		iceServers: () => mediaIceServers(this.#settings.allowRelay),
 		sendSignal: (toId, description) => this.#sendTo(toId, { type: 'signal', fromId: HOST_ID, description }),
 		onStreams: (streams) => {
 			this.thumbnails = streams;
@@ -425,6 +437,31 @@ export class HostSession implements SwitcherApi {
 		this.#publish();
 	}
 
+	/**
+	 * 映像の中継（TURN）を許可するかどうかを切り替える
+	 *
+	 * 許可すると、直接つながらなかった映像接続を、すぐにつなぎ直す。
+	 */
+	setAllowRelay(allow: boolean): void {
+		this.#settings = { ...this.#settings, allowRelay: allow };
+		if (allow) {
+			this.relayNeeded = [];
+			this.#failures.clear();
+		}
+		this.#log(allow ? '映像の中継を許可しました' : '映像の中継をやめました');
+		this.#publish();
+	}
+
+	/** 「直接つながらない」の知らせを閉じる */
+	dismissRelayNeeded(): void {
+		this.relayNeeded = [];
+	}
+
+	/** 配信元で中継（TURN）が使えるか */
+	get relayAvailable(): boolean {
+		return hasRelay(cachedIceServers());
+	}
+
 	/** 端末を切断する（その端末は、自動ではつなぎ直さない） */
 	disconnect(id: string): void {
 		const entry = this.#nodes.get(id);
@@ -542,6 +579,10 @@ export class HostSession implements SwitcherApi {
 				if (entry.info.role === 'controller') this.recordAll(message.on === true);
 				break;
 
+			case 'telop':
+				if (entry.info.role === 'admin') this.#setTelop(id, sanitizeScene(message.scene));
+				break;
+
 			case 'signal':
 				// 実際に張ろうとしている接続の打ち合わせだけを取り次ぐ
 				if (
@@ -589,6 +630,7 @@ export class HostSession implements SwitcherApi {
 		this.#nodes.set(info.id, { info, pairing, token });
 
 		pairing.send({ type: 'registered', id: info.id, name: info.name, token } satisfies HostMessage);
+		pairing.send({ type: 'telops', telops: Object.fromEntries(this.#telops) } satisfies HostMessage);
 		this.#log(returning ? `${info.name} がつなぎ直しました` : `${info.name} がつながりました`);
 		this.#publish();
 	}
@@ -631,6 +673,8 @@ export class HostSession implements SwitcherApi {
 		if (!entry) return;
 		const { id, name } = entry.info;
 		this.#nodes.delete(id);
+		// テロップの内容は、つなぎ直したときにテロップ端末が送り直す
+		if (this.#telops.has(id)) this.#setTelop(id, null);
 
 		if (!this.#removing.delete(id)) {
 			// 戻ってきたときに同じ端末として扱えるよう、覚えておく
@@ -655,6 +699,14 @@ export class HostSession implements SwitcherApi {
 			if (entry.pairing === pairing) return entry;
 		}
 		return undefined;
+	}
+
+	/** テロップの内容を覚えて、全端末に配る */
+	#setTelop(sourceId: string, scene: TelopScene | null): void {
+		if (scene) this.#telops.set(sourceId, scene);
+		else this.#telops.delete(sourceId);
+		const message = JSON.stringify({ type: 'telop', sourceId, scene } satisfies HostMessage);
+		for (const other of this.#nodes.values()) other.pairing.link.send(message);
 	}
 
 	// ---- 状況の配布と、映像接続の調整 ----
@@ -729,6 +781,9 @@ export class HostSession implements SwitcherApi {
 		if (!this.#links.delete(key)) return;
 		const [sourceId, sinkId] = key.split('>');
 		this.#failures.delete(key);
+		if (this.relayNeeded.some((link) => linkKey(link.sourceId, link.sinkId) === key)) {
+			this.relayNeeded = this.relayNeeded.filter((link) => linkKey(link.sourceId, link.sinkId) !== key);
+		}
 		this.#sendTo(sourceId, { type: 'drop_link', peerId: sinkId });
 		this.#sendTo(sinkId, { type: 'drop_link', peerId: sourceId });
 	}
@@ -750,6 +805,15 @@ export class HostSession implements SwitcherApi {
 
 		const failures = (this.#failures.get(key) ?? 0) + 1;
 		this.#failures.set(key, failures);
+		// 中継を許せばつながるかもしれない、とホストの画面で知らせる
+		if (
+			failures >= RELAY_HINT_AFTER &&
+			!this.#settings.allowRelay &&
+			this.relayAvailable &&
+			!this.relayNeeded.some((link) => linkKey(link.sourceId, link.sinkId) === key)
+		) {
+			this.relayNeeded = [...this.relayNeeded, { sourceId, sinkId }];
+		}
 		const delay = Math.min(RETRY_BASE_MS * 2 ** (failures - 1), RETRY_MAX_MS);
 		this.#later(delay, () => this.#reconcile());
 	}
@@ -842,7 +906,10 @@ export class HostSession implements SwitcherApi {
 			}
 			if (Array.isArray(saved.routes)) this.#routes = saved.routes;
 			if (typeof saved.settings?.allowRecording === 'boolean') {
-				this.#settings = { allowRecording: saved.settings.allowRecording };
+				this.#settings = { ...this.#settings, allowRecording: saved.settings.allowRecording };
+			}
+			if (typeof saved.settings?.allowRelay === 'boolean') {
+				this.#settings = { ...this.#settings, allowRelay: saved.settings.allowRelay };
 			}
 		} catch {
 			// 保存内容が壊れていたら、読めた分だけで始める

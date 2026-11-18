@@ -49,6 +49,32 @@ export async function expectMonitorShowsVideo(page: Page): Promise<void> {
 		.toBe(true);
 }
 
+/**
+ * モニターが描いているテロップを調べる
+ *
+ * @param mode full: テロップだけを映している / overlay: カメラ映像に重ねている
+ * @returns 白い文字が描かれているか、左上の隅が透けているか（描いていなければ null）
+ */
+export async function telopPixels(
+	page: Page,
+	mode: 'full' | 'overlay'
+): Promise<{ text: boolean; clearCorner: boolean } | null> {
+	return page.evaluate((mode) => {
+		const canvas = document.querySelector<HTMLCanvasElement>(`canvas[data-telop="${mode}"]`);
+		const context = canvas?.getContext('2d');
+		if (!canvas || !context || canvas.width === 0) return null;
+		const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+		let text = false;
+		for (let i = 0; i < data.length; i += 16) {
+			if (data[i] > 230 && data[i + 1] > 230 && data[i + 2] > 230 && data[i + 3] > 230) {
+				text = true;
+				break;
+			}
+		}
+		return { text, clearCorner: data[3] === 0 };
+	}, mode);
+}
+
 /** ページ内の映像（確認用の小さな映像など）が、指定した数だけ再生されていることを確かめる */
 export async function expectPlayingVideos(page: Page, count: number): Promise<void> {
 	await expect

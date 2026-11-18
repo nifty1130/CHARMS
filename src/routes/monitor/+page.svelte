@@ -3,6 +3,7 @@
 	import NameEditor from '../../components/NameEditor.svelte';
 	import NodeShell from '../../components/NodeShell.svelte';
 	import RecordControl from '../../components/RecordControl.svelte';
+	import TelopLayer from '../../components/TelopLayer.svelte';
 	import VideoView from '../../components/VideoView.svelte';
 	import { ClientSession } from '$lib/charms/client.svelte';
 	import type { Layout } from '$lib/charms/protocol';
@@ -20,6 +21,11 @@
 	const programId = $derived(route?.program ?? null);
 	const sourceIds = $derived(Object.keys(session.streams));
 
+	/** テロップか（テロップは映像を受け取らず、届いた文字のデータをこのモニターが描く） */
+	function isText(id: string | null): boolean {
+		return !!id && session.snapshot.nodes.find((node) => node.id === id)?.role === 'admin';
+	}
+
 	/** 実際に画面に出している映像 */
 	let shownId = $state<string | null>(null);
 	/** 絵が出始めた映像（ストリームごとに覚える） */
@@ -32,6 +38,7 @@
 		void playingVersion;
 		const wanted = secondaryOf(route);
 		if (!wanted || wanted === shownId) return null;
+		if (isText(wanted)) return wanted;
 		const stream = session.streams[wanted];
 		return stream && playing.has(stream) ? wanted : null;
 	});
@@ -39,6 +46,10 @@
 	const view = $derived<Layout>(subId ? (route?.layout ?? 'single') : 'single');
 
 	let videos = $state<Record<string, HTMLVideoElement>>({});
+	/** テロップを描いているキャンバス（録画で使う） */
+	let telopCanvases = $state<Record<string, HTMLCanvasElement>>({});
+	/** いま描いているテロップ（本番・重ねるもの） */
+	const telopIds = $derived([...new Set([shownId, subId])].filter((id): id is string => isText(id)));
 	let soundOn = $state(false);
 	/**
 	 * 映像だけを出す（配信ソフトに取り込むとき用。リンクに `?clean=1` を付ける）
@@ -63,6 +74,8 @@
 
 		if (programId === null) {
 			shownId = null;
+		} else if (isText(programId)) {
+			shownId = programId;
 		} else if (streams[programId] && playing.has(streams[programId])) {
 			shownId = programId;
 		} else if (current && !streams[current]) {
@@ -73,9 +86,15 @@
 	// 録画中は、画面に出している映像を録画にも反映する
 	$effect(() => {
 		const id = shownId;
-		mixer?.setProgram(id ? (videos[id] ?? null) : null, id ? (session.streams[id] ?? null) : null);
-		mixer?.setSecondary(subId ? (videos[subId] ?? null) : null, view);
+		mixer?.setProgram(drawable(id), id && !isText(id) ? (session.streams[id] ?? null) : null);
+		mixer?.setSecondary(drawable(subId), view);
 	});
+
+	/** 録画に描き写すもの（映像、またはテロップのキャンバス） */
+	function drawable(id: string | null): HTMLVideoElement | HTMLCanvasElement | null {
+		if (!id) return null;
+		return (isText(id) ? telopCanvases[id] : videos[id]) ?? null;
+	}
 
 	/** 映像ごとの、画面の中での置き方 */
 	function placement(id: string): { class: string; fit: 'contain' | 'cover' } {
@@ -94,7 +113,9 @@
 				};
 			}
 			if (view === 'split') return { class: 'inset-y-0 right-0 h-full w-1/2 opacity-100', fit: 'contain' };
-			// テロップ重ね: 黒い部分を透かして、明るい文字だけを重ねる
+			// テロップは背景が透けているので、そのまま重ねる
+			if (isText(id)) return { class: 'inset-0 z-[1] h-full w-full opacity-100', fit: 'contain' };
+			// カメラなどの映像: 黒い部分を透かして、明るい部分だけを重ねる
 			return { class: 'inset-0 z-[1] h-full w-full opacity-100 mix-blend-screen', fit: 'contain' };
 		}
 		return { class: 'inset-0 h-full w-full opacity-0', fit: 'contain' };
@@ -161,18 +182,24 @@
 		return session.snapshot.nodes.find((node) => node.id === id)?.name ?? '';
 	}
 
-	function startMix(): MediaStream {
+	/** 音なしで録画しているか（音をまとめる仕組みが動かなかったとき） */
+	let silentRecording = $state(false);
+
+	async function startMix(): Promise<MediaStream> {
 		mixer?.destroy();
 		mixer = new ProgramMixer();
+		await mixer.prepare();
+		silentRecording = !mixer.audible;
 		const id = shownId;
-		mixer.setProgram(id ? (videos[id] ?? null) : null, id ? (session.streams[id] ?? null) : null);
-		mixer.setSecondary(subId ? (videos[subId] ?? null) : null, view);
+		mixer.setProgram(drawable(id), id && !isText(id) ? (session.streams[id] ?? null) : null);
+		mixer.setSecondary(drawable(subId), view);
 		return mixer.stream;
 	}
 
 	function stopMix() {
 		mixer?.destroy();
 		mixer = null;
+		silentRecording = false;
 	}
 </script>
 
@@ -198,6 +225,16 @@
 				onPlaying={() => markPlaying(id)}
 				fit={place.fit}
 				class="absolute {place.class}"
+			/>
+		{/each}
+
+		<!-- テロップは、届いた文字のデータをこのモニターが描く -->
+		{#each telopIds as id (id)}
+			<TelopLayer
+				scene={session.telops[id] ?? null}
+				transparent={id === subId && view === 'overlay'}
+				bind:canvas={telopCanvases[id]}
+				class="absolute {placement(id).class}"
 			/>
 		{/each}
 
@@ -291,6 +328,9 @@
 							getStream={startMix}
 							label={session.name}
 							description="このモニターに映した映像を、切り替えも含めてそのまま録画します"
+							notice={silentRecording
+								? 'このモニターの画面に一度も触れていないため、ブラウザが音を止めています。音なしで録画しています（画面に一度触れてから録画すると、音も入ります）'
+								: null}
 							onChange={(recording) => session.setStatus({ recording })}
 							onStopped={stopMix}
 						/>
