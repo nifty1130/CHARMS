@@ -153,6 +153,18 @@ export interface HostSessionOptions {
 	persist?: boolean;
 }
 
+/**
+ * 切れた端末の情報から、その場かぎりの状態を消す
+ *
+ * 映像を出しているか・録画中か・インカムを話している（聞いている）かは、端末のページを
+ * 読み込み直すと最初の状態に戻る。戻ってきた端末が改めて知らせるまでは「していない」とみなす。
+ * 特にインカムは、残しておくと、カメラの画面では「聞かない」なのに声が流れてしまう。
+ */
+function offline(info: NodeInfo): NodeInfo {
+	const { talking: _talking, listening: _listening, ...rest } = info;
+	return { ...rest, live: false, recording: false };
+}
+
 export class HostSession implements SwitcherApi {
 	/** いまの状況 */
 	snapshot = $state.raw<SessionSnapshot>(emptySnapshot());
@@ -608,7 +620,7 @@ export class HostSession implements SwitcherApi {
 		if (current && current.token === token && current.info.role === role) {
 			this.#nodes.delete(id);
 			this.#sayBye(current.pairing, 'replaced');
-			return { info: { ...current.info, live: false, recording: false }, token };
+			return { info: offline(current.info), token };
 		}
 
 		const past = this.#remembered.get(id);
@@ -635,10 +647,7 @@ export class HostSession implements SwitcherApi {
 		if (!this.#removing.delete(id)) {
 			// 戻ってきたときに同じ端末として扱えるよう、覚えておく
 			this.#remembered.delete(id);
-			this.#remembered.set(id, {
-				info: { ...entry.info, live: false, recording: false },
-				token: entry.token
-			});
+			this.#remembered.set(id, { info: offline(entry.info), token: entry.token });
 			for (const oldest of this.#remembered.keys()) {
 				if (this.#remembered.size <= MAX_REMEMBERED) break;
 				this.#remembered.delete(oldest);
