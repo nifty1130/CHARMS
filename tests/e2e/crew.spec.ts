@@ -92,3 +92,43 @@ test('スイッチャーから、全端末の録画をまとめて始めて止�
 	expect(fromMonitor.suggestedFilename()).toMatch(/^モニター_1_.*\.(webm|mp4)$/);
 	await expect(controller.getByText('録画中の端末はありません')).toBeVisible();
 });
+
+test('画面に触れていないモニター（ブラウザが音を止めている）でも、一斉録画のファイルが保存される', async ({
+	context
+}) => {
+	const host = await openHost(context);
+	const code = (await host.getByTestId('room-code').innerText()).replace(/\s/g, '');
+	const camera = await join(context, '/camera/', 'カメラ 1');
+	const controller = await join(context, '/controller/', 'スイッチャー 1');
+
+	// 招待リンクで自動でつながり、一度も触れていないモニター。
+	// 音をまとめる仕組みが止まったままで、webm 形式で録画するブラウザ（Android・Linux の Chrome など）のまねをする
+	const monitor = await context.newPage();
+	await monitor.addInitScript(() => {
+		const supported = MediaRecorder.isTypeSupported.bind(MediaRecorder);
+		MediaRecorder.isTypeSupported = (type: string) => !type.startsWith('video/mp4') && supported(type);
+		const Original = window.AudioContext;
+		window.AudioContext = class extends Original {
+			constructor(options?: AudioContextOptions) {
+				super(options);
+				void this.suspend();
+				this.resume = async () => {};
+			}
+		};
+	});
+	await monitor.goto(`/monitor/?room=${code}`);
+	await startCamera(camera);
+	await expect(host.getByText('3台とつながっています')).toBeVisible({ timeout: 30_000 });
+	await controller.getByRole('button', { name: 'カメラ 1 を映す' }).click();
+	await expectMonitorShowsVideo(monitor);
+
+	await host.getByRole('checkbox', { name: /録画を許可する/ }).check();
+	await controller.getByRole('button', { name: /全端末で録画を始める/ }).click();
+	await expect(controller.getByText('2台が録画中')).toBeVisible({ timeout: 20_000 });
+	// 音なしで録画していることを、モニターの画面で知らせる
+	await expect(monitor.getByText(/音なしで録画しています/)).toBeAttached();
+
+	const download = monitor.waitForEvent('download');
+	await controller.getByRole('button', { name: /全端末の録画を止める/ }).click();
+	expect((await download).suggestedFilename()).toMatch(/^モニター_1_.*\.webm$/);
+});
