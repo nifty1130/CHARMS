@@ -2,7 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('$app/paths', () => ({ base: '' }));
 
-import { cachedIceServers, loadIceServers, parseIceServers, resetIceServers } from './ice';
+import {
+	cachedIceServers,
+	hasRelay,
+	loadIceServers,
+	mediaIceServers,
+	parseIceServers,
+	resetIceServers,
+	withoutRelay
+} from './ice';
 
 const STUN = { urls: ['stun:stun.cloudflare.com:3478'] };
 const TURN = { urls: ['turn:turn.cloudflare.com:3478?transport=udp'], username: 'u', credential: 'c' };
@@ -115,5 +123,25 @@ describe('loadIceServers', () => {
 
 		expect(await loadIceServers()).toEqual([]);
 		expect(fetcher).not.toHaveBeenCalled();
+	});
+});
+
+describe('映像の中継（TURN）の制限', () => {
+	beforeEach(() => resetIceServers());
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('TURN を除いて STUN だけを残し、TURN があるかを調べられる', () => {
+		const mixed = { urls: ['stun:a.example:3478', 'turns:b.example:5349'], username: 'u', credential: 'c' };
+		expect(withoutRelay([STUN, TURN, mixed])).toEqual([STUN, { urls: ['stun:a.example:3478'] }]);
+		expect(hasRelay([STUN, TURN])).toBe(true);
+		expect(hasRelay([STUN])).toBe(false);
+		expect(hasRelay(withoutRelay([STUN, TURN]))).toBe(false);
+	});
+
+	it('映像接続には、中継を許したときだけ TURN を使う', async () => {
+		vi.stubGlobal('fetch', respond({ iceServers: [STUN, TURN], ttl: 86400 }));
+		await loadIceServers();
+		expect(mediaIceServers(false)).toEqual([STUN]);
+		expect(mediaIceServers(true)).toEqual([STUN, TURN]);
 	});
 });

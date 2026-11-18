@@ -186,16 +186,16 @@
 				<div>
 					<h1 class="text-xl font-semibold tracking-tight">ホストとつなぐ</h1>
 					<p class="hint mt-1">
-						ホストの画面に出ている合言葉を入力するか、お互いの QR コードを読み取り合います。
+						ホストと、お互いの QR コードを読み取り合います。ホストの画面に6桁の合言葉が出ていれば、入力するだけでもつながります。
 					</p>
 				</div>
 
-				<RoomJoin {session} />
-
 				<div>
-					<h2 class="mb-1 text-base font-semibold">QR コードでつなぐ（インターネットがなくても使えます）</h2>
+					<h2 class="mb-1 text-base font-semibold">
+						QR コードでつなぐ<span class="hint ml-2 font-normal">インターネットは不要</span>
+					</h2>
 					<p class="hint mb-3">
-						ホストの画面の「QR コードでつなぐ」を見ながら、お互いの QR コードを読み取り合います。
+						ホストの画面の「QR コードでつなぐ」を見ながら、お互いの QR コードを、この画面で読み取り合います。
 					</p>
 					<ConnectPanel
 						pairing={session.pairing}
@@ -204,6 +204,8 @@
 						onRestart={() => session.restartPairing()}
 					/>
 				</div>
+
+				<RoomJoin {session} />
 			</div>
 		{/if}
 	</div>

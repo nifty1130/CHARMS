@@ -125,6 +125,13 @@ export interface Route {
 export interface SessionSettings {
 	/** 録画を許可するか。許可しないと、どの端末にも録画ボタンが出ない */
 	allowRecording: boolean;
+	/**
+	 * 映像の中継（TURN）を許可するか
+	 *
+	 * 中継は通信量に応じて費用がかかるので、初期値はオフ。オフでも、端末とホストの間の
+	 * 制御用のつながり（文字だけ。通信量はごくわずか）には中継を使える。
+	 */
+	allowRelay: boolean;
 }
 
 /** ホストが全端末に配る「いまの状況」 */
@@ -243,7 +250,7 @@ export function isSourceRole(role: NodeRole): boolean {
 
 /** 空の状況（つながる前の初期値） */
 export function emptySnapshot(): SessionSnapshot {
-	return { nodes: [], routes: [], settings: { allowRecording: false } };
+	return { nodes: [], routes: [], settings: { allowRecording: false, allowRelay: false } };
 }
 
 /**

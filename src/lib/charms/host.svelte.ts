@@ -19,7 +19,7 @@
  * 状況を端末に保存しておけば（`persist`）、ホストのページを読み込み直しても続きから再開できる。
  */
 
-import { cachedIceServers } from './ice';
+import { cachedIceServers, hasRelay, mediaIceServers } from './ice';
 import { LocalHostBeacon } from './local-pairing.svelte';
 import { MediaLinks } from './media-links';
 import { Pairing } from './pairing.svelte';
@@ -69,6 +69,9 @@ import {
 import type { SwitcherApi } from './switcher-api';
 
 const NODE_ROLES: NodeRole[] = ['camera', 'admin', 'monitor', 'controller'];
+
+/** 同じ映像接続が何回続けて失敗したら、「中継を使いますか」と知らせるか */
+const RELAY_HINT_AFTER = 2;
 
 function isZoomInfo(value: unknown): value is ZoomInfo {
 	if (typeof value !== 'object' || value === null) return false;
@@ -168,6 +171,12 @@ export class HostSession implements SwitcherApi {
 	restored = $state(false);
 	/** 合言葉での受け付けを、開いたときから始めてよいか（前回やめていたら false） */
 	roomPreferred = true;
+	/**
+	 * 直接つながらなかった映像接続（中継を許せばつながるかもしれないもの）
+	 *
+	 * 中継を許していないときに、同じ接続が2回続けて失敗したら、ここに入れて知らせる。
+	 */
+	relayNeeded = $state.raw<{ sourceId: string; sinkId: string }[]>([]);
 	/** 出来事の記録（新しいものが先頭） */
 	events = $state.raw<HostEvent[]>([]);
 
@@ -187,7 +196,7 @@ export class HostSession implements SwitcherApi {
 	readonly #lingering = new Map<string, ReturnType<typeof setTimeout>>();
 	/** 映したい内容（いまいない端末の分も含む。戻ってきたときに元に戻すため） */
 	#routes: Route[] = [];
-	#settings: SessionSettings = { allowRecording: false };
+	#settings: SessionSettings = { allowRecording: false, allowRelay: false };
 	#inviting = false;
 	#destroyed = false;
 
@@ -198,7 +207,7 @@ export class HostSession implements SwitcherApi {
 	#joining = 0;
 
 	readonly #media = new MediaLinks({
-		iceServers: cachedIceServers,
+		iceServers: () => mediaIceServers(this.#settings.allowRelay),
 		sendSignal: (toId, description) => this.#sendTo(toId, { type: 'signal', fromId: HOST_ID, description }),
 		onStreams: (streams) => {
 			this.thumbnails = streams;
@@ -423,6 +432,31 @@ export class HostSession implements SwitcherApi {
 	setAllowRecording(allow: boolean): void {
 		this.#settings = { ...this.#settings, allowRecording: allow };
 		this.#publish();
+	}
+
+	/**
+	 * 映像の中継（TURN）を許可するかどうかを切り替える
+	 *
+	 * 許可すると、直接つながらなかった映像接続を、すぐにつなぎ直す。
+	 */
+	setAllowRelay(allow: boolean): void {
+		this.#settings = { ...this.#settings, allowRelay: allow };
+		if (allow) {
+			this.relayNeeded = [];
+			this.#failures.clear();
+		}
+		this.#log(allow ? '映像の中継を許可しました' : '映像の中継をやめました');
+		this.#publish();
+	}
+
+	/** 「直接つながらない」の知らせを閉じる */
+	dismissRelayNeeded(): void {
+		this.relayNeeded = [];
+	}
+
+	/** 配信元で中継（TURN）が使えるか */
+	get relayAvailable(): boolean {
+		return hasRelay(cachedIceServers());
 	}
 
 	/** 端末を切断する（その端末は、自動ではつなぎ直さない） */
@@ -729,6 +763,9 @@ export class HostSession implements SwitcherApi {
 		if (!this.#links.delete(key)) return;
 		const [sourceId, sinkId] = key.split('>');
 		this.#failures.delete(key);
+		if (this.relayNeeded.some((link) => linkKey(link.sourceId, link.sinkId) === key)) {
+			this.relayNeeded = this.relayNeeded.filter((link) => linkKey(link.sourceId, link.sinkId) !== key);
+		}
 		this.#sendTo(sourceId, { type: 'drop_link', peerId: sinkId });
 		this.#sendTo(sinkId, { type: 'drop_link', peerId: sourceId });
 	}
@@ -750,6 +787,15 @@ export class HostSession implements SwitcherApi {
 
 		const failures = (this.#failures.get(key) ?? 0) + 1;
 		this.#failures.set(key, failures);
+		// 中継を許せばつながるかもしれない、とホストの画面で知らせる
+		if (
+			failures >= RELAY_HINT_AFTER &&
+			!this.#settings.allowRelay &&
+			this.relayAvailable &&
+			!this.relayNeeded.some((link) => linkKey(link.sourceId, link.sinkId) === key)
+		) {
+			this.relayNeeded = [...this.relayNeeded, { sourceId, sinkId }];
+		}
 		const delay = Math.min(RETRY_BASE_MS * 2 ** (failures - 1), RETRY_MAX_MS);
 		this.#later(delay, () => this.#reconcile());
 	}
@@ -842,7 +888,10 @@ export class HostSession implements SwitcherApi {
 			}
 			if (Array.isArray(saved.routes)) this.#routes = saved.routes;
 			if (typeof saved.settings?.allowRecording === 'boolean') {
-				this.#settings = { allowRecording: saved.settings.allowRecording };
+				this.#settings = { ...this.#settings, allowRecording: saved.settings.allowRecording };
+			}
+			if (typeof saved.settings?.allowRelay === 'boolean') {
+				this.#settings = { ...this.#settings, allowRelay: saved.settings.allowRelay };
 			}
 		} catch {
 			// 保存内容が壊れていたら、読めた分だけで始める

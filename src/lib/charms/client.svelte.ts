@@ -10,7 +10,7 @@
  *   こちらは、接続が切れたりページを読み込み直したりしても、自動でつなぎ直す
  */
 
-import { cachedIceServers } from './ice';
+import { mediaIceServers } from './ice';
 import { MediaLinks } from './media-links';
 import { Pairing } from './pairing.svelte';
 import {
@@ -178,7 +178,8 @@ export class ClientSession implements SwitcherApi {
 		this.role = role;
 		this.name = loadName(role);
 		this.media = new MediaLinks({
-			iceServers: cachedIceServers,
+			// 映像の中継（TURN）は、ホストが許したときだけ使う
+			iceServers: () => mediaIceServers(this.snapshot.settings.allowRelay === true),
 			sendSignal: (toId, description) => this.#send({ type: 'signal', toId, description }),
 			onStreams: (streams) => {
 				this.streams = streams;
