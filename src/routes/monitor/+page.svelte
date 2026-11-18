@@ -182,9 +182,14 @@
 		return session.snapshot.nodes.find((node) => node.id === id)?.name ?? '';
 	}
 
-	function startMix(): MediaStream {
+	/** 音なしで録画しているか（音をまとめる仕組みが動かなかったとき） */
+	let silentRecording = $state(false);
+
+	async function startMix(): Promise<MediaStream> {
 		mixer?.destroy();
 		mixer = new ProgramMixer();
+		await mixer.prepare();
+		silentRecording = !mixer.audible;
 		const id = shownId;
 		mixer.setProgram(drawable(id), id && !isText(id) ? (session.streams[id] ?? null) : null);
 		mixer.setSecondary(drawable(subId), view);
@@ -194,6 +199,7 @@
 	function stopMix() {
 		mixer?.destroy();
 		mixer = null;
+		silentRecording = false;
 	}
 </script>
 
@@ -322,6 +328,9 @@
 							getStream={startMix}
 							label={session.name}
 							description="このモニターに映した映像を、切り替えも含めてそのまま録画します"
+							notice={silentRecording
+								? 'このモニターの画面に一度も触れていないため、ブラウザが音を止めています。音なしで録画しています（画面に一度触れてから録画すると、音も入ります）'
+								: null}
 							onChange={(recording) => session.setStatus({ recording })}
 							onStopped={stopMix}
 						/>
